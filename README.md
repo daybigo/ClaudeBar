@@ -34,7 +34,7 @@ A tiny menu‑bar‑style app for Windows that shows how much of your Claude pla
 
 **Requirements:** Windows 10/11 and **Claude Code** installed and logged in (Claude Bar reads your local Claude Code session — see *How it works*).
 
-1. Download the installer `Claude Bar_0.1.0_x64-setup.exe` from [Releases](#).
+1. Download the installer `Claude Bar_0.1.0_x64-setup.exe` from [**Releases**](https://github.com/daybigo/ClaudeBar/releases/latest).
 2. Run it (installs to your user, no admin needed; SmartScreen may warn for an unsigned app → *More info → Run anyway*).
 3. The panel appears on first run; afterwards it lives in the tray. It can start with Windows (toggle in the tray icon menu).
 
