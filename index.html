@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude Bar</title>
+  </head>
+  <body>
+    <div id="panel" class="panel">
+      <!-- ===== Barra de titulo (arrastrable) ===== -->
+      <header class="titlebar">
+        <div class="tb-drag" data-tauri-drag-region>
+          <span class="tb-pill">✳ Claude</span>
+        </div>
+        <div class="tb-buttons">
+          <button class="tb-btn" data-act="compact" title="Modo compacto" aria-label="Compacto">
+            <svg viewBox="0 0 14 14" width="13" height="13">
+              <rect x="1.2" y="1.2" width="11.6" height="11.6" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/>
+              <rect x="2.8" y="2.8" width="5" height="5" rx="1" fill="currentColor"/>
+            </svg>
+          </button>
+          <button class="tb-btn" data-act="minimize" title="Minimizar a la bandeja" aria-label="Minimizar">
+            <svg viewBox="0 0 14 14" width="13" height="13">
+              <line x1="2.5" y1="7" x2="11.5" y2="7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- ===== Vista completa ===== -->
+      <div id="full-view">
+        <div class="head">
+          <div class="head-row">
+            <h1 id="provider-title">Claude</h1>
+            <span id="plan-badge" class="plan">—</span>
+          </div>
+          <div id="updated" class="subtle">Cargando…</div>
+        </div>
+
+        <hr class="rule" />
+
+        <section class="block">
+          <h2 data-i18n="session">Sesión</h2>
+          <div class="bar"><div id="session-fill" class="fill"></div></div>
+          <div class="bar-foot">
+            <span id="session-pct" class="muted">—</span>
+            <span id="session-reset" class="muted right"></span>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2 data-i18n="weekly">Semanal</h2>
+          <div class="bar"><div id="weekly-fill" class="fill"></div></div>
+          <div class="bar-foot">
+            <span id="weekly-pct" class="muted">—</span>
+            <span id="weekly-reset" class="muted right"></span>
+          </div>
+          <div id="weekly-pace" class="pace"></div>
+        </section>
+
+        <section class="block" id="sonnet-block">
+          <h2>Sonnet</h2>
+          <div class="bar"><div id="sonnet-fill" class="fill"></div></div>
+          <div class="bar-foot">
+            <span id="sonnet-pct" class="muted">—</span>
+          </div>
+        </section>
+
+        <hr class="rule" />
+
+        <section class="block">
+          <h2 data-i18n="extra">Uso extra</h2>
+          <div class="bar"><div id="extra-fill" class="fill"></div></div>
+          <div class="bar-foot">
+            <span id="extra-amount" class="muted">—</span>
+            <span id="extra-pct" class="muted right"></span>
+          </div>
+        </section>
+
+        <hr class="rule" />
+
+        <section class="block cost">
+          <div class="head-row">
+            <h2 data-i18n="cost">Costo</h2>
+            <span class="chevron">›</span>
+          </div>
+          <div id="cost-today" class="cost-line">—</div>
+          <div id="cost-week" class="cost-line">—</div>
+          <div id="cost-30" class="cost-line">—</div>
+          <div id="cost-note" class="cost-line subtle"></div>
+        </section>
+
+        <hr class="rule" />
+
+        <section class="actions">
+          <button class="action" data-act="dashboard"><span class="ic">▥</span> <span data-i18n="dashboard">Panel de uso</span></button>
+          <button class="action" data-act="status"><span class="ic">⟋</span> <span data-i18n="status">Estado del servicio</span></button>
+          <button class="action" data-act="refresh"><span class="ic">⟳</span> <span data-i18n="refresh">Actualizar ahora</span></button>
+        </section>
+
+        <hr class="rule" />
+
+        <section class="actions footer">
+          <button class="action plain" data-act="settings"><span class="ic">⚙</span> <span data-i18n="settings">Ajustes</span></button>
+          <button class="action plain" data-act="about"><span class="ic">ⓘ</span> <span data-i18n="about">Acerca de</span></button>
+          <button class="action plain" data-act="logout"><span class="ic">⎋</span> <span data-i18n="logout">Cerrar sesión (Claude)</span></button>
+          <button class="action plain danger" data-act="quit"><span class="ic">⏻</span> <span data-i18n="quit">Cerrar aplicación</span></button>
+          <button class="action plain lang" data-act="lang"><span id="lang-label">English</span></button>
+        </section>
+      </div>
+
+      <!-- ===== Vista compacta (solo sesion + semanal) ===== -->
+      <div id="compact-view">
+        <div class="cv-drag" data-tauri-drag-region></div>
+        <button class="cv-expand" data-act="expand" title="Expandir">
+          <svg viewBox="0 0 14 14" width="11" height="11">
+            <rect x="1.2" y="1.2" width="11.6" height="11.6" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          </svg>
+        </button>
+        <div class="cv-rows">
+          <div class="cv-row">
+            <span class="cv-label" data-i18n="session">Sesión</span>
+            <span id="cv-session-pct" class="cv-pct">—</span>
+          </div>
+          <div class="bar"><div id="cv-session-fill" class="fill"></div></div>
+          <div class="cv-row">
+            <span class="cv-label" data-i18n="weekly">Semanal</span>
+            <span id="cv-weekly-pct" class="cv-pct">—</span>
+          </div>
+          <div class="bar"><div id="cv-weekly-fill" class="fill"></div></div>
+        </div>
+      </div>
+
+      <!-- ===== Modal (Acerca de / Ajustes / Login) ===== -->
+      <div id="modal" class="modal hidden">
+        <div class="modal-card">
+          <button class="modal-x" data-act="modal-close" aria-label="Cerrar">✕</button>
+          <h3 id="modal-title"></h3>
+          <div id="modal-body"></div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

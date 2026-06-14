@@ -1,0 +1,37 @@
+[package]
+name = "claudebar"
+version = "0.1.0"
+description = "Monitor de uso de Claude para la bandeja de Windows (estilo CodexBar)"
+authors = ["Daybi"]
+edition = "2021"
+
+[lib]
+name = "claudebar_lib"
+# Solo rlib: en escritorio Windows el cdylib/staticlib (para movil) hace que el
+# linker GNU falle con "export ordinal too large" por la enorme superficie de
+# simbolos de Tauri. El binario enlaza el rlib normalmente.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"] }
+tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
+chrono = { version = "0.4", features = ["clock", "serde"] }
+walkdir = "2"
+dirs = "5"
+ab_glyph = "0.2"
+
+# Binario pequeño y rapido para tener siempre abierto
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

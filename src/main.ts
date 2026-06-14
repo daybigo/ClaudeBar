@@ -1,0 +1,342 @@
+import "./styles.css";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
+
+// ----- Tipos (coinciden con el backend, camelCase) -----
+interface LimitWindow {
+  utilization: number;
+  resetsAt: string | null;
+  resetsInLabel: string;
+}
+interface ExtraUsage {
+  usedUsd: number;
+  limitUsd: number;
+  utilization: number;
+}
+interface UsageSnapshot {
+  connected: boolean;
+  plan: string;
+  fiveHour: LimitWindow;
+  sevenDay: LimitWindow;
+  sevenDaySonnet: LimitWindow | null;
+  extraUsage: ExtraUsage;
+  stale: boolean;
+  error: string | null;
+  updatedAt: string;
+}
+interface CostReport {
+  todayUsd: number;
+  todayTokens: number;
+  weekUsd: number;
+  monthUsd: number;
+  last30Usd: number;
+  last30Tokens: number;
+  updatedAt: string;
+  empty: boolean;
+}
+
+// ----- i18n -----
+type Dict = Record<string, string>;
+const I18N: Record<string, Dict> = {
+  es: {
+    session: "Sesión", weekly: "Semanal", extra: "Uso extra", cost: "Costo",
+    dashboard: "Panel de uso", status: "Estado del servicio", refresh: "Actualizar ahora",
+    settings: "Ajustes", about: "Acerca de", logout: "Cerrar sesión (Claude)", quit: "Cerrar aplicación",
+    used: "usado", resetsIn: "Reinicia en", pace: "Ritmo",
+    behind: "Por debajo del ritmo", ahead: "Por encima del ritmo", onpace: "En ritmo",
+    today: "Hoy", week: "Semana", last30: "Últimos 30 días", tokens: "tokens",
+    costNote: "≈ valor equivalente en API · tu plan lo cubre",
+    thisMonth: "Este mes", updatedJust: "actualizado recién", ago: "hace",
+    connect: "Conecta Claude Code para ver tu uso", langBtn: "English",
+    aboutTitle: "Acerca de Claude Bar", settingsTitle: "Ajustes", logoutTitle: "Cerrar sesión (Claude)",
+  },
+  en: {
+    session: "Session", weekly: "Weekly", extra: "Extra usage", cost: "Cost",
+    dashboard: "Usage Dashboard", status: "Status Page", refresh: "Refresh now",
+    settings: "Settings", about: "About", logout: "Log out (Claude)", quit: "Quit",
+    used: "used", resetsIn: "Resets in", pace: "Pace",
+    behind: "Behind pace", ahead: "Ahead of pace", onpace: "On pace",
+    today: "Today", week: "Week", last30: "Last 30 days", tokens: "tokens",
+    costNote: "≈ API-equivalent value · covered by your plan",
+    thisMonth: "This month", updatedJust: "updated just now", ago: "ago",
+    connect: "Connect Claude Code to see your usage", langBtn: "Español",
+    aboutTitle: "About Claude Bar", settingsTitle: "Settings", logoutTitle: "Log out (Claude)",
+  },
+};
+let lang = localStorage.getItem("lang") === "en" ? "en" : "es";
+const t = (k: string) => I18N[lang][k] ?? k;
+
+const $ = (id: string) => document.getElementById(id)!;
+const appWindow = getCurrentWindow();
+const FULL = { w: 384, h: 700 };
+const COMPACT = { w: 228, h: 112 };
+
+let lastUsage: UsageSnapshot | null = null;
+let lastCost: CostReport | null = null;
+let lastUpdatedIso = "";
+let lastPlan = "";
+
+// ----- Formato -----
+function fmtUsd(n: number): string {
+  return "$ " + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1) + "M";
+  if (n >= 1_000) return Math.round(n / 1_000) + "K";
+  return String(n);
+}
+function fmtPct(n: number): string {
+  return (n < 10 ? n.toFixed(n < 1 ? 1 : 0) : Math.round(n).toString()) + "%";
+}
+function relTime(iso: string): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return "";
+  const s = Math.floor(Math.max(0, Date.now() - then) / 1000);
+  if (s < 8) return t("updatedJust");
+  const val = s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} h`;
+  return lang === "es" ? `${t("ago")} ${val}` : `${val} ${t("ago")}`;
+}
+function setBar(id: string, util: number) {
+  ($(id) as HTMLElement).style.width = Math.max(0, Math.min(100, util)) + "%";
+}
+function weeklyPace(win: LimitWindow): string {
+  if (!win.resetsAt) return "";
+  const end = new Date(win.resetsAt).getTime();
+  if (isNaN(end)) return "";
+  const windowMs = 7 * 24 * 3600 * 1000;
+  const frac = Math.max(0, Math.min(1, (windowMs - (end - Date.now())) / windowMs));
+  const delta = win.utilization - frac * 100;
+  const sign = delta >= 0 ? "+" : "";
+  const label = delta < -2 ? t("behind") : delta > 2 ? t("ahead") : t("onpace");
+  return `${t("pace")}: ${label} (${sign}${delta.toFixed(0)}%)`;
+}
+
+// ----- Pintado -----
+function applyUsage(u: UsageSnapshot) {
+  lastUsage = u;
+  lastPlan = u.connected ? u.plan : "";
+  $("plan-badge").textContent = lastPlan;
+
+  const updated = $("updated");
+  if (!u.connected) {
+    updated.textContent = t("connect");
+    updated.classList.add("stale");
+  } else if (u.error && u.stale) {
+    updated.textContent = `${u.plan} · ${u.error}`;
+    updated.classList.add("stale");
+  } else {
+    lastUpdatedIso = u.updatedAt;
+    updated.textContent = `${u.plan} · ${relTime(u.updatedAt)}`;
+    updated.classList.remove("stale");
+  }
+
+  // Sesión (5h)
+  setBar("session-fill", u.fiveHour.utilization);
+  $("session-pct").textContent = `${fmtPct(u.fiveHour.utilization)} ${t("used")}`;
+  $("session-reset").textContent = u.fiveHour.resetsInLabel
+    ? `${t("resetsIn")} ${u.fiveHour.resetsInLabel}`
+    : "";
+  setBar("cv-session-fill", u.fiveHour.utilization);
+  $("cv-session-pct").textContent = fmtPct(u.fiveHour.utilization);
+
+  // Semanal (7d)
+  setBar("weekly-fill", u.sevenDay.utilization);
+  $("weekly-pct").textContent = `${fmtPct(u.sevenDay.utilization)} ${t("used")}`;
+  $("weekly-reset").textContent = u.sevenDay.resetsInLabel
+    ? `${t("resetsIn")} ${u.sevenDay.resetsInLabel}`
+    : "";
+  $("weekly-pace").textContent = weeklyPace(u.sevenDay);
+  setBar("cv-weekly-fill", u.sevenDay.utilization);
+  $("cv-weekly-pct").textContent = fmtPct(u.sevenDay.utilization);
+
+  // Sonnet
+  const sonnet = u.sevenDaySonnet;
+  if (sonnet) {
+    setBar("sonnet-fill", sonnet.utilization);
+    $("sonnet-pct").textContent = `${fmtPct(sonnet.utilization)} ${t("used")}`;
+    $("sonnet-block").style.display = "";
+  } else {
+    $("sonnet-block").style.display = "none";
+  }
+
+  // Uso extra
+  const ex = u.extraUsage;
+  setBar("extra-fill", ex.utilization);
+  $("extra-amount").textContent = `${t("thisMonth")}: ${fmtUsd(ex.usedUsd)} / ${fmtUsd(ex.limitUsd)}`;
+  $("extra-pct").textContent = `${fmtPct(ex.utilization)} ${t("used")}`;
+}
+
+function applyCost(c: CostReport) {
+  lastCost = c;
+  $("cost-today").textContent = `${t("today")}: ${fmtUsd(c.todayUsd)} · ${fmtTokens(c.todayTokens)} ${t("tokens")}`;
+  $("cost-week").textContent = `${t("week")}: ${fmtUsd(c.weekUsd)}`;
+  $("cost-30").textContent = `${t("last30")}: ${fmtUsd(c.last30Usd)} · ${fmtTokens(c.last30Tokens)} ${t("tokens")}`;
+  $("cost-note").textContent = t("costNote");
+}
+
+// ----- Idioma -----
+function applyLang() {
+  document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+    el.textContent = t(el.dataset.i18n || "");
+  });
+  $("lang-label").textContent = t("langBtn");
+  document.documentElement.lang = lang;
+  if (lastUsage) applyUsage(lastUsage);
+  if (lastCost) applyCost(lastCost);
+}
+function toggleLang() {
+  lang = lang === "es" ? "en" : "es";
+  localStorage.setItem("lang", lang);
+  applyLang();
+}
+
+// ----- Modal -----
+function openModal(title: string, html: string) {
+  $("modal-title").textContent = title;
+  $("modal-body").innerHTML = html;
+  $("modal").classList.remove("hidden");
+}
+function closeModal() {
+  $("modal").classList.add("hidden");
+}
+async function showAbout() {
+  const v = await getVersion();
+  const body =
+    lang === "es"
+      ? `<p><b>Claude Bar</b> — monitor de uso de Claude para Windows, en tu bandeja.</p>
+         <p>Proyecto creado por <b>Daybi</b>.</p>
+         <p>Open source · build in public.</p>
+         <p class="muted2">Versión ${v} · Rust + Tauri</p>`
+      : `<p><b>Claude Bar</b> — Claude usage monitor for Windows, in your tray.</p>
+         <p>Created by <b>Daybi</b>.</p>
+         <p>Open source · build in public.</p>
+         <p class="muted2">Version ${v} · Rust + Tauri</p>`;
+  openModal(t("aboutTitle"), body);
+}
+async function showSettings() {
+  const v = await getVersion();
+  const body =
+    lang === "es"
+      ? `<div class="row"><span>Versión</span><span class="muted2">${v}</span></div>
+         <div class="row"><span>Cuenta</span><span class="muted2">Claude Code (local)</span></div>
+         <div class="row"><span>Inicio con Windows</span><span class="muted2">menú del icono</span></div>
+         <div class="row"><span>Refresco de uso</span><span class="muted2">5 min</span></div>
+         <div class="row"><span>Refresco de costo</span><span class="muted2">60 s</span></div>
+         <p class="muted2" style="margin-top:12px">Arrastra la barra superior para mover la ventana.</p>`
+      : `<div class="row"><span>Version</span><span class="muted2">${v}</span></div>
+         <div class="row"><span>Account</span><span class="muted2">Claude Code (local)</span></div>
+         <div class="row"><span>Start with Windows</span><span class="muted2">tray menu</span></div>
+         <div class="row"><span>Usage refresh</span><span class="muted2">5 min</span></div>
+         <div class="row"><span>Cost refresh</span><span class="muted2">60 s</span></div>
+         <p class="muted2" style="margin-top:12px">Drag the top bar to move the window.</p>`;
+  openModal(t("settingsTitle"), body);
+}
+function showLogout() {
+  const body =
+    lang === "es"
+      ? `<p>Claude Bar usa la sesión local de <b>Claude Code</b> en tu PC.</p>
+         <p class="muted2">Para cambiar de cuenta, cierra sesión en Claude Code
+         (<code>claude /logout</code>) e inicia sesión con otra cuenta.</p>`
+      : `<p>Claude Bar uses the local <b>Claude Code</b> session on your PC.</p>
+         <p class="muted2">To switch accounts, log out of Claude Code
+         (<code>claude /logout</code>) and log in with another account.</p>`;
+  openModal(t("logoutTitle"), body);
+}
+
+// ----- Ventana / acciones -----
+async function setCompact(on: boolean) {
+  document.body.classList.toggle("compact", on);
+  if (on) {
+    await appWindow.setSize(new LogicalSize(COMPACT.w, COMPACT.h));
+    await appWindow.setPosition(new LogicalPosition(12, 12));
+  } else {
+    await appWindow.setSize(new LogicalSize(FULL.w, FULL.h));
+  }
+}
+
+async function handleAction(act: string) {
+  switch (act) {
+    case "minimize":
+      await appWindow.hide();
+      break;
+    case "compact":
+      await setCompact(true);
+      break;
+    case "expand":
+      await setCompact(false);
+      break;
+    case "dashboard":
+      await openUrl("https://claude.ai/usage");
+      break;
+    case "status":
+      await openUrl("https://status.anthropic.com");
+      break;
+    case "refresh":
+      await invoke("refresh_now");
+      break;
+    case "settings":
+      await showSettings();
+      break;
+    case "about":
+      await showAbout();
+      break;
+    case "logout":
+      showLogout();
+      break;
+    case "lang":
+      toggleLang();
+      break;
+    case "modal-close":
+      closeModal();
+      break;
+    case "quit":
+      await invoke("quit");
+      break;
+  }
+}
+
+// ----- Arranque -----
+async function main() {
+  applyLang();
+
+  document.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((btn) => {
+    btn.addEventListener("click", () => handleAction(btn.dataset.act || ""));
+  });
+
+  await listen<UsageSnapshot>("usage-updated", (e) => applyUsage(e.payload));
+  await listen<CostReport>("cost-updated", (e) => applyCost(e.payload));
+
+  try {
+    applyUsage(await invoke<UsageSnapshot>("get_usage"));
+    applyCost(await invoke<CostReport>("get_cost"));
+  } catch (err) {
+    console.error("estado inicial:", err);
+  }
+
+  // Reintenta hasta que el primer cálculo de costo esté listo.
+  let tries = 0;
+  const catchUp = setInterval(async () => {
+    tries++;
+    try {
+      const c = await invoke<CostReport>("get_cost");
+      applyCost(c);
+      applyUsage(await invoke<UsageSnapshot>("get_usage"));
+      if (!c.empty || tries >= 12) clearInterval(catchUp);
+    } catch {
+      /* reintenta */
+    }
+  }, 1500);
+
+  setInterval(() => {
+    if (lastUpdatedIso && !$("updated").classList.contains("stale")) {
+      $("updated").textContent = `${lastPlan} · ${relTime(lastUpdatedIso)}`;
+    }
+  }, 20_000);
+}
+
+main();
