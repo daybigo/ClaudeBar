@@ -1,109 +1,109 @@
 # Claude Bar
 
-> Keep your **Claude** subscription usage in your Windows tray — session limit, weekly limit, and cost, always one click away.
+> Mira el uso de tu suscripción de **Claude** desde la bandeja de Windows: límite de sesión, límite semanal y costo, siempre a un clic.
 
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Platform: Windows 10/11](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6)
-![Built with: Rust + Tauri](https://img.shields.io/badge/Built%20with-Rust%20%2B%20Tauri-orange)
+![Licencia: MIT](https://img.shields.io/badge/Licencia-MIT-blue.svg)
+![Plataforma: Windows 10/11](https://img.shields.io/badge/Plataforma-Windows%2010%2F11-0078D6)
+![Hecho con: Rust + Tauri](https://img.shields.io/badge/Hecho%20con-Rust%20%2B%20Tauri-orange)
 ![RAM: ~50 MB](https://img.shields.io/badge/RAM-~50%20MB-success)
 
-<!-- Add a clean screenshot here: docs/panel.png -->
+![Claude Bar](docs/app.png)
 
-A tiny menu‑bar‑style app for Windows that shows how much of your Claude plan you've used, inspired by [CodexBar](https://github.com/steipete/codexbar) (which is macOS‑only). Built with **Rust + Tauri 2**, so it sips RAM (~50 MB) and the binary is ~3.6 MB.
+Una pequeña app tipo *menu bar* para Windows que muestra cuánto has usado de tu plan de Claude. Hecha con **Rust + Tauri 2**, así que consume poca RAM (~50 MB) y el binario pesa ~3.6 MB.
 
-> Created by **Daybi** · built in public 🛠️ · open source (MIT)
+> Creado por **Daybi** · *build in public* · open source (MIT)
 
-## Why
+## Por qué
 
-- **See your limits at a glance** — the tray icon shows your 5‑hour session % so you always know where you stand.
-- **No dashboards** — session, weekly, Sonnet and cost, right in your tray.
-- **Private by design** — everything is read **locally** on your PC. No servers, no telemetry, no account of the author involved.
-- **Light** — native Windows WebView2 (no bundled Chromium), so it can stay open all day.
+- **Tus límites de un vistazo** — el icono de la bandeja muestra el % de tu sesión de 5 horas, así siempre sabes cómo vas.
+- **Sin abrir paneles** — sesión, semanal, Sonnet y costo, directo en la bandeja.
+- **Privado por diseño** — todo se lee **localmente** en tu PC. Sin servidores, sin telemetría, sin la cuenta del autor de por medio.
+- **Liviano** — usa el WebView2 nativo de Windows (sin Chromium empaquetado), así que puede estar abierto todo el día.
 
-## What it shows
+## Qué muestra
 
-- **Session** — the 5‑hour limit: % used and when it resets.
-- **Weekly** — the 7‑day limit: % used, reset time and "pace".
-- **Sonnet** — the model‑specific weekly window.
-- **Extra usage** — extra monthly spend (if enabled on your account).
-- **Cost** — today / week / last 30 days, as an **API‑equivalent value** (what you'd pay pay‑as‑you‑go; your plan covers it).
-- **Exact plan** — e.g. `Max 20x`, derived from your rate‑limit tier.
-- Glassmorphism UI · movable · minimize / compact modes · Windows notifications · Spanish & English.
+- **Sesión** — el límite de 5 horas: % usado y cuándo se reinicia.
+- **Semanal** — el límite de 7 días: % usado, hora de reinicio y "ritmo".
+- **Sonnet** — la ventana semanal específica del modelo.
+- **Uso extra** — gasto extra del mes (si lo tienes habilitado en tu cuenta).
+- **Costo** — hoy / semana / últimos 30 días, como **valor equivalente en API** (lo que pagarías por uso; tu plan lo cubre).
+- **Plan exacto** — por ejemplo `Max 20x`, según tu nivel de límites.
+- Interfaz *glassmorphism* · movible · modos minimizar / compacto · notificaciones de Windows · español e inglés.
 
-## Install
+## Instalación
 
-**Requirements:** Windows 10/11 and **Claude Code** installed and logged in (Claude Bar reads your local Claude Code session — see *How it works*).
+**Requisitos:** Windows 10/11 y **Claude Code** instalado e iniciado sesión (Claude Bar lee tu sesión local de Claude Code — ver *Cómo funciona*).
 
-1. Download the installer `Claude Bar_0.1.0_x64-setup.exe` from [**Releases**](https://github.com/daybigo/ClaudeBar/releases/latest).
-2. Run it (installs to your user, no admin needed; SmartScreen may warn for an unsigned app → *More info → Run anyway*).
-3. The panel appears on first run; afterwards it lives in the tray. It can start with Windows (toggle in the tray icon menu).
+1. Descarga el instalador `Claude Bar_0.1.0_x64-setup.exe` desde [**Releases**](https://github.com/daybigo/ClaudeBar/releases/latest).
+2. Ejecútalo (se instala en tu usuario, sin admin). SmartScreen de Windows puede avisar por ser una app sin firmar → **Más información → Ejecutar de todas formas**.
+3. El panel aparece la primera vez; después vive en la bandeja. Puede iniciar con Windows (se activa en el menú del icono).
 
-## How it works
+## Cómo funciona
 
-Everything is read locally on your machine:
+Todo se lee localmente en tu máquina:
 
-| Data | Source |
+| Dato | Origen |
 |------|--------|
-| Session / Weekly / Sonnet / Extra | `GET https://api.anthropic.com/api/oauth/usage` using your local Claude Code OAuth token |
-| Token + plan tier | `%USERPROFILE%\.claude\.credentials.json` |
-| Cost & tokens | parsing `%USERPROFILE%\.claude\projects\**\*.jsonl` (like `ccusage`) |
+| Sesión / Semanal / Sonnet / Extra | `GET https://api.anthropic.com/api/oauth/usage` con el token OAuth local de Claude Code |
+| Token + nivel de plan | `%USERPROFILE%\.claude\.credentials.json` |
+| Costo y tokens | analizando `%USERPROFILE%\.claude\projects\**\*.jsonl` |
 
-- The token is **read** from the file Claude Code already maintains; it is never bundled or sent anywhere except Anthropic's own usage endpoint.
-- The usage endpoint is rate‑limited, so Claude Bar polls every **5 min** (with backoff). Cost is recomputed every **60 s**.
-- Cost is an **estimate** (Claude Code doesn't store the real cost; it's computed from token counts using a local price table).
+- El token se **lee** del archivo que Claude Code ya mantiene; nunca se empaqueta ni se envía a ningún lado, salvo al propio endpoint de uso de Anthropic.
+- El endpoint de uso tiene límite de peticiones, así que Claude Bar consulta cada **5 min** (con reintentos). El costo se recalcula cada **60 s**.
+- El costo es una **estimación** (Claude Code no guarda el costo real; se calcula a partir de los tokens con una tabla de precios local).
 
-### Where Claude Bar stores its data
+### Dónde guarda sus datos Claude Bar
 
-Claude Bar barely stores anything of its own:
+Claude Bar casi no guarda nada propio:
 
-- **First‑run flag** + WebView data (language preference): `%APPDATA%\com.daybi.claudebar\` and `%LOCALAPPDATA%\com.daybi.claudebar\`.
-- **Start‑with‑Windows**: a `Claude Bar` entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
-- **The app**: `%LOCALAPPDATA%\Claude Bar\`.
-- It does **not** copy or store your Claude token — it reads it live from `~/.claude/.credentials.json` each time.
+- **Marca de primer arranque** + datos del WebView (preferencia de idioma): `%APPDATA%\com.daybi.claudebar\` y `%LOCALAPPDATA%\com.daybi.claudebar\`.
+- **Inicio con Windows**: una entrada `Claude Bar` en `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+- **La app**: `%LOCALAPPDATA%\Claude Bar\`.
+- **No** copia ni guarda tu token de Claude — lo lee en vivo de `~/.claude/.credentials.json` cada vez.
 
-## Features
+## Características
 
-- Tray icon with the live session % drawn inside (green → amber → red).
-- Click the tray icon to open/close; **drag the top bar** to move the window anywhere.
-- **Minimize** to tray, or **compact mode** (tiny always‑on‑top widget in the corner showing only Session + Weekly).
-- **Notifications** when your 5‑hour session resets, when you hit the session limit, and when your weekly limit resets.
-- **Languages**: Spanish (default) and English, toggle at the bottom.
-- **Glassmorphism**: translucent, blurred, light UI.
+- Icono de bandeja con el % de la sesión dibujado dentro (verde → ámbar → rojo).
+- Clic en el icono para abrir/cerrar; **arrastra la barra superior** para mover la ventana a donde quieras.
+- **Minimizar** a la bandeja, o **modo compacto** (un widget pequeño siempre encima, en la esquina, mostrando solo Sesión + Semanal).
+- **Notificaciones** cuando se reinicia tu sesión de 5 horas, cuando llegas al límite de sesión y cuando se reinicia tu límite semanal.
+- **Idiomas**: español (por defecto) e inglés, se cambia abajo.
+- **Glassmorphism**: interfaz translúcida, difuminada y clara.
 
-## Privacy
+## Privacidad
 
-Claude Bar is read‑only and offline‑first. It only talks to `api.anthropic.com` (the same usage endpoint Claude Code uses) and reads files on your own disk. No analytics, no third‑party servers. The source is open — audit it.
+Claude Bar es de solo lectura y funciona sin conexión primero. Solo habla con `api.anthropic.com` (el mismo endpoint de uso que usa Claude Code) y lee archivos en tu propio disco. Sin analítica, sin servidores de terceros. El código es abierto: audítalo.
 
-> Note on accounts: Claude Bar uses **your own** local Claude Code session. It does **not** implement a third‑party login, on purpose — reusing Claude's OAuth client for third‑party logins is against Anthropic's Terms. To switch accounts, log out/in within Claude Code.
+> Nota sobre cuentas: Claude Bar usa **tu propia** sesión local de Claude Code. **No** implementa un inicio de sesión de terceros, a propósito — reutilizar el cliente OAuth de Claude para logins de terceros va contra los Términos de Anthropic. Para cambiar de cuenta, cierra/inicia sesión dentro de Claude Code.
 
-## Build from source
+## Compilar desde el código
 
-Requirements: [Rust](https://rustup.rs/) (MSVC toolchain recommended), [Node.js](https://nodejs.org/), and Windows with WebView2 (preinstalled on Win 11).
+Requisitos: [Rust](https://rustup.rs/) (se recomienda el toolchain MSVC), [Node.js](https://nodejs.org/) y Windows con WebView2 (ya viene en Win 11).
 
 ```powershell
-npm install                       # frontend deps (once)
-npm run tauri dev                 # development, hot reload
-npm run tauri build               # release installer (NSIS) in src-tauri/target/release/bundle/nsis/
-npm run tauri build --no-bundle   # just the standalone .exe
+npm install                       # dependencias del frontend (una vez)
+npm run tauri dev                 # desarrollo, con recarga en caliente
+npm run tauri build               # instalador release (NSIS) en src-tauri/target/release/bundle/nsis/
+npm run tauri build --no-bundle   # solo el .exe portable
 ```
 
-Structure:
+Estructura:
 
 ```
 claudebar/
-├─ index.html · src/main.ts · src/styles.css   # UI (i18n, glass)
+├─ index.html · src/main.ts · src/styles.css   # interfaz (i18n, glass)
 └─ src-tauri/src/
-   ├─ main.rs · lib.rs        # tray, window, polling, notifications
-   ├─ credentials.rs          # reads the local token + plan
-   ├─ claude_api.rs           # oauth/usage endpoint
-   ├─ cost.rs · pricing.rs    # cost from the local jsonl logs
-   └─ tray_icon.rs            # draws the % inside the tray icon
+   ├─ main.rs · lib.rs        # bandeja, ventana, polling, notificaciones
+   ├─ credentials.rs          # lee el token local + el plan
+   ├─ claude_api.rs           # endpoint oauth/usage
+   ├─ cost.rs · pricing.rs    # costo desde los logs jsonl locales
+   └─ tray_icon.rs            # dibuja el % dentro del icono de la bandeja
 ```
 
-## Credits
+## Créditos
 
-Inspired by [CodexBar](https://github.com/steipete/codexbar) by Peter Steinberger. Cost calculation modeled after [ccusage](https://github.com/ryoppippi/ccusage).
+Inspirado en [CodexBar](https://github.com/steipete/codexbar) de Peter Steinberger, pero para Windows.
 
-## License
+## Licencia
 
 MIT © Daybi
