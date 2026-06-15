@@ -297,8 +297,18 @@ a {
   border-color: rgba(224, 138, 74, 0.4);
 }
 .card .ic {
-  font-size: 26px;
-  margin-bottom: 14px;
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(224, 138, 74, 0.12);
+  color: var(--clay2);
+  margin-bottom: 16px;
+}
+.card .ic svg {
+  width: 22px;
+  height: 22px;
 }
 .card h3 {
   font-size: 18px;
@@ -374,7 +384,8 @@ a {
   color: var(--muted);
   margin-top: 10px;
 }
-.dl-card .btn {
+.dl-cta {
+  justify-content: center;
   margin-top: 26px;
 }
 

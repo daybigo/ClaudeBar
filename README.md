@@ -5,11 +5,11 @@
 ![Licencia: MIT](https://img.shields.io/badge/Licencia-MIT-blue.svg)
 ![Plataforma: Windows 10/11](https://img.shields.io/badge/Plataforma-Windows%2010%2F11-0078D6)
 ![Hecho con: Rust + Tauri](https://img.shields.io/badge/Hecho%20con-Rust%20%2B%20Tauri-orange)
-![RAM: ~50 MB](https://img.shields.io/badge/RAM-~50%20MB-success)
+![RAM: menos de 30 MB](https://img.shields.io/badge/RAM-%3C30%20MB-success)
 
 ![Claude Bar](docs/app.png)
 
-Una pequeña app tipo *menu bar* para Windows que muestra cuánto has usado de tu plan de Claude. Hecha con **Rust + Tauri 2**, así que consume poca RAM (~50 MB) y el binario pesa ~3.6 MB.
+Una pequeña app tipo *menu bar* para Windows que muestra cuánto has usado de tu plan de Claude. Hecha con **Rust + Tauri 2**, así que consume poca RAM (menos de 30 MB) y el binario pesa ~3.6 MB.
 
 > Creado por **Daybi** · *build in public* · open source (MIT)
 
