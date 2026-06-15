@@ -214,8 +214,10 @@ a {
 .hero-shot img {
   position: relative;
   z-index: 1;
-  width: min(380px, 92%);
-  border-radius: 22px;
+  width: auto;
+  max-width: 88%;
+  max-height: 560px;
+  border-radius: 20px;
   border: 1px solid var(--border);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   animation: float 6s ease-in-out infinite;
