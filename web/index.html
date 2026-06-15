@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude Bar — Tu uso de Claude, en la bandeja de Windows</title>
+    <meta name="description" content="App ligera para Windows que muestra tu uso de Claude (sesión de 5h, límite semanal, Sonnet y costo) en la bandeja del sistema. Open source, privada y de bajo consumo. Inspirada en CodexBar, pero para Windows." />
+    <link rel="icon" type="image/png" href="favicon.png" />
+
+    <!-- Open Graph / compartir -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Claude Bar — Tu uso de Claude en la bandeja de Windows" />
+    <meta property="og:description" content="Sesión de 5h, límite semanal, Sonnet y costo, siempre a un clic. Ligera, privada y open source." />
+    <meta property="og:image" content="app.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow"></div>
+
+    <!-- ===== Nav ===== -->
+    <header class="nav">
+      <a class="brand" href="#top">
+        <span class="brand-mark">✳</span>
+        <span>Claude Bar</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features">Características</a>
+        <a href="#how">Cómo funciona</a>
+        <a href="#download">Descargar</a>
+        <a class="nav-ghost" href="https://github.com/daybigo/ClaudeBar" target="_blank" rel="noopener">GitHub</a>
+        <a class="nav-xtarify" href="https://xtarify.com" target="_blank" rel="noopener">⚡ xtarify.com</a>
+      </nav>
+    </header>
+
+    <!-- ===== Hero ===== -->
+    <main id="top">
+      <section class="hero">
+        <div class="hero-copy">
+          <span class="pill">Inspirado en CodexBar · pero para Windows</span>
+          <h1>Tu uso de <span class="grad">Claude</span>, en la bandeja de Windows.</h1>
+          <p class="sub">
+            Sesión de 5 horas, límite semanal, Sonnet y costo — siempre a un clic.
+            Ligera, privada y open source. Sin abrir paneles, sin servidores.
+          </p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="https://github.com/daybigo/ClaudeBar/releases/download/v0.1.0/Claude.Bar_0.1.0_x64-setup.exe">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M3 5.5 10.5 4v7.5H3V5.5Zm0 8.5h7.5V21L3 19.5V14Zm8.5-10L21 2v9.5h-9.5V4ZM21 14v8l-9.5-1.5V14H21Z"/></svg>
+              Descargar para Windows
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/daybigo/ClaudeBar" target="_blank" rel="noopener">Ver en GitHub</a>
+          </div>
+          <p class="fine">Windows 10/11 · gratis y open source (MIT) · ~3.6 MB · necesita Claude Code</p>
+        </div>
+
+        <div class="hero-shot">
+          <div class="shot-glow"></div>
+          <img src="app.png" alt="Captura de Claude Bar mostrando sesión, semanal, Sonnet, uso extra y costo" loading="eager" />
+        </div>
+      </section>
+
+      <!-- ===== Strip de números ===== -->
+      <section class="stats">
+        <div class="stat"><b>~50&nbsp;MB</b><span>de RAM</span></div>
+        <div class="stat"><b>~3.6&nbsp;MB</b><span>el binario</span></div>
+        <div class="stat"><b>100%</b><span>local y privado</span></div>
+        <div class="stat"><b>ES&nbsp;/&nbsp;EN</b><span>bilingüe</span></div>
+      </section>
+
+      <!-- ===== Features ===== -->
+      <section id="features" class="section">
+        <div class="section-head">
+          <h2>Todo lo que necesitas saber, sin salir de la bandeja</h2>
+          <p>Un panel de cristal que vive junto a tu reloj.</p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <div class="ic">⏱️</div>
+            <h3>Sesión y semanal</h3>
+            <p>El % usado de tu ventana de 5 horas y de los 7 días, con cuándo se reinician y el "ritmo".</p>
+          </article>
+          <article class="card">
+            <div class="ic">💸</div>
+            <h3>Costo real</h3>
+            <p>Lo gastado hoy, esta semana y en 30 días, como valor equivalente en API. Tu plan lo cubre.</p>
+          </article>
+          <article class="card">
+            <div class="ic">🔔</div>
+            <h3>Notificaciones</h3>
+            <p>Te avisa cuando se reinicia tu sesión de 5h, cuando llegas al límite y cuando se reinicia la semana.</p>
+          </article>
+          <article class="card">
+            <div class="ic">🪟</div>
+            <h3>Movible y compacto</h3>
+            <p>Arrástrala a donde quieras, minimízala a la bandeja o déjala en modo compacto siempre encima.</p>
+          </article>
+          <article class="card">
+            <div class="ic">🔒</div>
+            <h3>Privada por diseño</h3>
+            <p>Todo se lee localmente en tu PC. Sin telemetría, sin servidores de terceros. Código abierto y auditable.</p>
+          </article>
+          <article class="card">
+            <div class="ic">🪶</div>
+            <h3>Ultraligera</h3>
+            <p>Hecha con Rust + Tauri sobre el WebView2 de Windows. Puede estar abierta todo el día sin que lo notes.</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ===== Cómo funciona ===== -->
+      <section id="how" class="section">
+        <div class="section-head">
+          <h2>Cómo funciona</h2>
+          <p>Lee la sesión que Claude Code ya tiene en tu PC. No inventa nada.</p>
+        </div>
+        <div class="how-grid">
+          <div class="how-step"><span class="num">1</span><div><h4>Lee tu sesión local</h4><p>Usa el token de Claude Code en <code>~/.claude</code>. Nunca se empaqueta ni se comparte.</p></div></div>
+          <div class="how-step"><span class="num">2</span><div><h4>Consulta tus límites</h4><p>Pregunta a Anthropic tu uso de sesión, semanal y Sonnet, cada pocos minutos.</p></div></div>
+          <div class="how-step"><span class="num">3</span><div><h4>Calcula tu costo</h4><p>Analiza tus logs locales para estimar tokens y gasto, sin enviar nada a ningún lado.</p></div></div>
+        </div>
+      </section>
+
+      <!-- ===== Descargar ===== -->
+      <section id="download" class="section download">
+        <div class="dl-card">
+          <h2>Descárgala gratis</h2>
+          <p>Para Windows 10 y 11. Open source bajo licencia MIT.</p>
+          <a class="btn btn-primary big" href="https://github.com/daybigo/ClaudeBar/releases/download/v0.1.0/Claude.Bar_0.1.0_x64-setup.exe">Descargar Claude Bar v0.1.0</a>
+          <p class="fine">¿SmartScreen avisa? Es por ser una app sin firmar → <b>Más información → Ejecutar de todas formas</b>.</p>
+        </div>
+      </section>
+
+      <!-- ===== xtarify ===== -->
+      <section class="xtarify-band">
+        <div>
+          <span class="xt-eyebrow">Un proyecto de</span>
+          <h3>⚡ xtarify</h3>
+          <p>Herramientas y contenido para sacarle el jugo a la IA.</p>
+        </div>
+        <a class="btn btn-xtarify" href="https://xtarify.com" target="_blank" rel="noopener">Visita xtarify.com →</a>
+      </section>
+    </main>
+
+    <!-- ===== Footer ===== -->
+    <footer class="footer">
+      <div class="foot-brand">
+        <span class="brand-mark">✳</span> Claude Bar
+        <span class="muted">· creado por Daybi · build in public</span>
+      </div>
+      <div class="foot-links">
+        <a href="https://github.com/daybigo/ClaudeBar" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/daybigo/ClaudeBar/releases/latest" target="_blank" rel="noopener">Releases</a>
+        <a href="https://xtarify.com" target="_blank" rel="noopener">xtarify.com</a>
+        <a href="https://github.com/steipete/codexbar" target="_blank" rel="noopener">CodexBar</a>
+      </div>
+      <div class="muted small">Open source · MIT © Daybi · No afiliado a Anthropic.</div>
+    </footer>
+  </body>
+</html>
