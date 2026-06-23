@@ -31,7 +31,7 @@
           "effects": ["acrylic"],
           "state": "active",
           "radius": 14,
-          "color": [252, 253, 255, 185]
+          "color": [24, 26, 36, 210]
         }
       }
     ],
