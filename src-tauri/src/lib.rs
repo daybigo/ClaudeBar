@@ -23,8 +23,10 @@ use tauri_plugin_opener::OpenerExt;
 
 /// Cada cuanto consultamos el endpoint de uso (limita agresivamente).
 const USAGE_INTERVAL_SECS: u64 = 300;
-/// Cada cuanto recalculamos el costo desde los logs locales.
-const COST_INTERVAL_SECS: u64 = 60;
+/// Cada cuanto revisamos si los logs cambiaron (solo stat, sin leer).
+const COST_POLL_SECS: u64 = 2;
+/// Recalculo de seguridad aunque no haya cambios (cubre el cambio de día).
+const COST_HEARTBEAT_TICKS: u64 = 150; // 150 * 2s = 5 min
 
 struct AppState {
     usage: Mutex<UsageSnapshot>,
@@ -339,16 +341,58 @@ fn run_usage_loop(app: AppHandle) {
     }
 }
 
+/// "Firma" barata del estado de los logs: suma de (mtime_ms + tamaño) de los
+/// .jsonl modificados en los ultimos 2 dias. Cambia ante cualquier escritura
+/// nueva (incluido un append dentro del mismo segundo, gracias al tamaño).
+/// Solo hace `stat`, no lee contenido.
+fn projects_signature() -> u64 {
+    let projects = credentials::claude_dir().join("projects");
+    let cutoff = std::time::SystemTime::now()
+        .checked_sub(Duration::from_secs(2 * 86_400))
+        .unwrap_or(std::time::UNIX_EPOCH);
+    let mut sig: u64 = 0;
+    for entry in walkdir::WalkDir::new(&projects).into_iter().flatten() {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().map(|e| e != "jsonl").unwrap_or(true) {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            if let Ok(modified) = meta.modified() {
+                if modified < cutoff {
+                    continue;
+                }
+                if let Ok(d) = modified.duration_since(std::time::UNIX_EPOCH) {
+                    sig = sig
+                        .wrapping_add(d.as_millis() as u64)
+                        .wrapping_add(meta.len());
+                }
+            }
+        }
+    }
+    sig
+}
+
 fn run_cost_loop(app: AppHandle) {
+    // Recalcula al instante cuando los logs cambian; tiempo real (~2s).
+    let mut last_sig: u64 = u64::MAX;
+    let mut ticks: u64 = 0;
     loop {
-        let report = cost::compute();
-        eprintln!(
-            "[claudebar] cost: hoy=${:.2} ({} tok) · 30d=${:.2}",
-            report.today_usd, report.today_tokens, report.last30_usd
-        );
-        *app.state::<AppState>().cost.lock().unwrap() = report.clone();
-        let _ = app.emit("cost-updated", report);
-        std::thread::sleep(Duration::from_secs(COST_INTERVAL_SECS));
+        let sig = projects_signature();
+        ticks += 1;
+        if sig != last_sig || ticks % COST_HEARTBEAT_TICKS == 0 {
+            last_sig = sig;
+            let report = cost::compute();
+            eprintln!(
+                "[claudebar] cost: hoy=${:.2} ({} tok) · 30d=${:.2}",
+                report.today_usd, report.today_tokens, report.last30_usd
+            );
+            *app.state::<AppState>().cost.lock().unwrap() = report.clone();
+            let _ = app.emit("cost-updated", report);
+        }
+        std::thread::sleep(Duration::from_secs(COST_POLL_SECS));
     }
 }
 

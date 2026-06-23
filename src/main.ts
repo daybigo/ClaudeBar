@@ -3,8 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
+import { getCurrentWindow, Effect, EffectState } from "@tauri-apps/api/window";
+import { LogicalSize, LogicalPosition, PhysicalPosition } from "@tauri-apps/api/dpi";
 
 // ----- Tipos (coinciden con el backend, camelCase) -----
 interface LimitWindow {
@@ -51,8 +51,10 @@ const I18N: Record<string, Dict> = {
     today: "Hoy", week: "Semana", last30: "Últimos 30 días", tokens: "tokens",
     costNote: "≈ valor equivalente en API · tu plan lo cubre",
     thisMonth: "Este mes", updatedJust: "actualizado recién", ago: "hace",
-    connect: "Conecta Claude Code para ver tu uso", langBtn: "English",
+    connect: "Sin conexión a Claude Code · tocá para saber por qué", langBtn: "English",
     aboutTitle: "Acerca de Claude Bar", settingsTitle: "Ajustes", logoutTitle: "Cerrar sesión (Claude)",
+    theme: "Tema", whyTitle: "¿Por qué no conecta?",
+    background: "Fondo", choosePhoto: "Elegir foto…", removePhoto: "Quitar", transparency: "Transparencia", blur: "Desenfoque",
   },
   en: {
     session: "Session", weekly: "Weekly", extra: "Extra usage", cost: "Cost",
@@ -63,8 +65,10 @@ const I18N: Record<string, Dict> = {
     today: "Today", week: "Week", last30: "Last 30 days", tokens: "tokens",
     costNote: "≈ API-equivalent value · covered by your plan",
     thisMonth: "This month", updatedJust: "updated just now", ago: "ago",
-    connect: "Connect Claude Code to see your usage", langBtn: "Español",
+    connect: "Not connected to Claude Code · tap to learn why", langBtn: "Español",
     aboutTitle: "About Claude Bar", settingsTitle: "Settings", logoutTitle: "Log out (Claude)",
+    theme: "Theme", whyTitle: "Why not connected?",
+    background: "Background", choosePhoto: "Choose photo…", removePhoto: "Remove", transparency: "Transparency", blur: "Blur",
   },
 };
 let lang = localStorage.getItem("lang") === "en" ? "en" : "es";
@@ -74,6 +78,245 @@ const $ = (id: string) => document.getElementById(id)!;
 const appWindow = getCurrentWindow();
 const FULL = { w: 384, h: 700 };
 const COMPACT = { w: 228, h: 112 };
+
+// ----- Tema -----
+type Theme = "auto" | "midnight" | "daylight";
+let theme: Theme = ((): Theme => {
+  const s = localStorage.getItem("theme");
+  return s === "daylight" || s === "auto" || s === "midnight" ? s : "midnight";
+})();
+
+function resolveAuto(): "midnight" | "daylight" {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "midnight" : "daylight";
+}
+
+async function applyWindowEffect(th: Theme) {
+  try {
+    if (th === "daylight") {
+      await appWindow.setEffects({
+        effects: [Effect.Acrylic], state: EffectState.Active, radius: 14,
+        color: [245, 247, 251, 205],
+      });
+    } else if (th === "midnight") {
+      await appWindow.setEffects({
+        effects: [Effect.Acrylic], state: EffectState.Active, radius: 14,
+        color: [24, 26, 36, 210],
+      });
+    } else {
+      // Auto: Mica sigue el tema del sistema (Windows 11).
+      await appWindow.setEffects({ effects: [Effect.Mica], state: EffectState.Active, radius: 14 });
+    }
+  } catch (e) {
+    console.error("setEffects:", e);
+  }
+}
+
+async function applyTheme(th: Theme) {
+  theme = th;
+  localStorage.setItem("theme", th);
+  const eff = th === "auto" ? resolveAuto() : th;
+  document.documentElement.setAttribute("data-theme", eff);
+  applyPanelSurface();
+  await applyWindowEffect(th);
+}
+
+// ----- Fondo custom (foto + transparencia) -----
+const THEME_BASE: Record<string, string> = {
+  midnight: "28,30,42",
+  daylight: "248,250,253",
+};
+
+/// Pinta el "scrim" del panel: tinte del tema activo con la opacidad elegida,
+/// para que la foto de fondo se vea translúcida y el texto siga legible.
+function applyPanelSurface() {
+  const eff = theme === "auto" ? resolveAuto() : theme;
+  const base = THEME_BASE[eff] || THEME_BASE.midnight;
+  const op = parseFloat(localStorage.getItem("bgOpacity") || "0.45");
+  ($("panel") as HTMLElement).style.background = `rgba(${base},${op})`;
+}
+
+function getGallery(): string[] {
+  try {
+    const raw = localStorage.getItem("bgGallery");
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+function saveGallery(arr: string[]) {
+  localStorage.setItem("bgGallery", JSON.stringify(arr));
+}
+
+function applyBg() {
+  const stored = localStorage.getItem("bgPhoto");
+  const photo = stored && stored.length > 0 ? stored : null;
+  const el = $("bg-photo") as HTMLElement;
+  const panel = $("panel") as HTMLElement;
+  if (photo) {
+    el.style.backgroundImage = `url("${photo}")`;
+    document.body.classList.add("has-bg");
+    const b = parseInt(localStorage.getItem("bgBlur") || "13", 10);
+    panel.style.backdropFilter = `blur(${b}px)`;
+    (panel.style as { webkitBackdropFilter?: string }).webkitBackdropFilter = `blur(${b}px)`;
+  } else {
+    el.style.backgroundImage = "";
+    document.body.classList.remove("has-bg");
+    panel.style.backdropFilter = "";
+    (panel.style as { webkitBackdropFilter?: string }).webkitBackdropFilter = "";
+  }
+  applyPanelSurface();
+}
+
+function useNoBg() {
+  localStorage.removeItem("bgPhoto");
+  applyBg();
+}
+function useUserBg(dataUrl: string) {
+  localStorage.setItem("bgPhoto", dataUrl);
+  applyBg();
+}
+
+/// Reescala la imagen elegida para que entre cómoda en localStorage.
+function fileToScaledDataUrl(file: File, maxDim: number, quality: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("no 2d ctx"));
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => reject(new Error("img load error"));
+    img.src = url;
+  });
+}
+
+async function handleBgFile(file: File) {
+  // Intenta a buena calidad; si no entra en localStorage, baja resolución.
+  for (const [dim, q] of [[1200, 0.82], [900, 0.78], [640, 0.7]] as [number, number][]) {
+    try {
+      const dataUrl = await fileToScaledDataUrl(file, dim, q);
+      const gallery = getGallery();
+      if (!gallery.includes(dataUrl)) {
+        gallery.push(dataUrl);
+        while (gallery.length > 6) gallery.shift();
+        try {
+          saveGallery(gallery);
+        } catch {
+          // localStorage lleno: descarta la más vieja y reintenta.
+          gallery.shift();
+          saveGallery(gallery);
+        }
+      }
+      useUserBg(dataUrl);
+      renderGallery();
+      return;
+    } catch (e) {
+      if (dim === 640) console.error("bg photo:", e);
+    }
+  }
+}
+
+function removeFromGallery(dataUrl: string) {
+  saveGallery(getGallery().filter((p) => p !== dataUrl));
+  if (localStorage.getItem("bgPhoto") === dataUrl) useNoBg();
+  renderGallery();
+}
+
+/// Dibuja las miniaturas de la galería en Ajustes (si el modal está abierto).
+function renderGallery() {
+  const box = document.getElementById("bg-gallery");
+  if (!box) return;
+  const stored = localStorage.getItem("bgPhoto");
+  box.innerHTML = "";
+
+  // tile: sin fondo (estado por defecto)
+  const none = document.createElement("button");
+  none.className = "thumb none" + (!stored ? " active" : "");
+  none.title = lang === "es" ? "Sin fondo" : "No background";
+  none.textContent = "∅";
+  none.addEventListener("click", () => {
+    useNoBg();
+    renderGallery();
+  });
+  box.appendChild(none);
+
+  for (const p of getGallery()) {
+    const wrap = document.createElement("div");
+    wrap.className = "thumb-wrap";
+    const th = document.createElement("button");
+    th.className = "thumb" + (p === stored ? " active" : "");
+    th.style.backgroundImage = `url("${p}")`;
+    th.addEventListener("click", () => {
+      useUserBg(p);
+      renderGallery();
+    });
+    const x = document.createElement("button");
+    x.className = "thumb-x";
+    x.textContent = "✕";
+    x.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeFromGallery(p);
+    });
+    wrap.append(th, x);
+    box.appendChild(wrap);
+  }
+
+  const add = document.createElement("button");
+  add.className = "thumb add";
+  add.title = lang === "es" ? "Agregar foto" : "Add photo";
+  add.textContent = "+";
+  add.addEventListener("click", () => ($("bg-file") as HTMLInputElement).click());
+  box.appendChild(add);
+}
+
+// ----- Auto-ajuste de alto de la ventana al contenido -----
+let lastFitH = FULL.h;
+let fitScheduled = false;
+function scheduleFit() {
+  if (fitScheduled) return;
+  fitScheduled = true;
+  requestAnimationFrame(() => {
+    fitScheduled = false;
+    fitWindowHeight();
+  });
+}
+async function fitWindowHeight() {
+  if (document.body.classList.contains("compact")) return;
+  const fv = $("full-view").getBoundingClientRect().height;
+  const tb = (document.querySelector(".titlebar") as HTMLElement).getBoundingClientRect().height;
+  const target = Math.round(Math.min(700, Math.max(200, fv + tb + 28)));
+  if (Math.abs(target - lastFitH) < 4) return;
+  try {
+    const sf = await appWindow.scaleFactor();
+    const pos = await appWindow.outerPosition();
+    const size = await appWindow.outerSize();
+    // Mantiene fija la base (queda anclada sobre la bandeja) al cambiar de alto.
+    const deltaLogical = size.height / sf - target;
+    const newY = Math.round(pos.y + deltaLogical * sf);
+    await appWindow.setSize(new LogicalSize(FULL.w, target));
+    await appWindow.setPosition(new PhysicalPosition(pos.x, newY));
+    lastFitH = target;
+  } catch (e) {
+    console.error("fit:", e);
+  }
+}
+
+/// Clase de severidad para la barra (espeja los umbrales del icono de bandeja).
+function sevClass(util: number): string {
+  if (util >= 90) return "sev3";
+  if (util >= 70) return "sev2";
+  if (util >= 40) return "sev1";
+  return "";
+}
 
 let lastUsage: UsageSnapshot | null = null;
 let lastCost: CostReport | null = null;
@@ -102,7 +345,11 @@ function relTime(iso: string): string {
   return lang === "es" ? `${t("ago")} ${val}` : `${val} ${t("ago")}`;
 }
 function setBar(id: string, util: number) {
-  ($(id) as HTMLElement).style.width = Math.max(0, Math.min(100, util)) + "%";
+  const el = $(id) as HTMLElement;
+  el.style.width = Math.max(0, Math.min(100, util)) + "%";
+  el.classList.remove("sev1", "sev2", "sev3");
+  const c = sevClass(util);
+  if (c) el.classList.add(c);
 }
 function weeklyPace(win: LimitWindow): string {
   if (!win.resetsAt) return "";
@@ -121,6 +368,8 @@ function applyUsage(u: UsageSnapshot) {
   lastUsage = u;
   lastPlan = u.connected ? u.plan : "";
   $("plan-badge").textContent = lastPlan;
+
+  document.body.classList.toggle("disconnected", !u.connected);
 
   const updated = $("updated");
   if (!u.connected) {
@@ -169,14 +418,26 @@ function applyUsage(u: UsageSnapshot) {
   setBar("extra-fill", ex.utilization);
   $("extra-amount").textContent = `${t("thisMonth")}: ${fmtUsd(ex.usedUsd)} / ${fmtUsd(ex.limitUsd)}`;
   $("extra-pct").textContent = `${fmtPct(ex.utilization)} ${t("used")}`;
+
+  scheduleFit();
 }
 
 function applyCost(c: CostReport) {
+  const prev = lastCost;
   lastCost = c;
-  $("cost-today").textContent = `${t("today")}: ${fmtUsd(c.todayUsd)} · ${fmtTokens(c.todayTokens)} ${t("tokens")}`;
+  if (prev && prev.todayUsd !== c.todayUsd) {
+    const el = $("cost-today-val");
+    el.classList.remove("bump");
+    void el.offsetWidth; // fuerza reflow para reiniciar la animación
+    el.classList.add("bump");
+  }
+  $("cost-today-val").textContent = fmtUsd(c.todayUsd);
+  $("cost-today-sub").textContent = `${t("today")} · ${fmtTokens(c.todayTokens)} ${t("tokens")}`;
   $("cost-week").textContent = `${t("week")}: ${fmtUsd(c.weekUsd)}`;
   $("cost-30").textContent = `${t("last30")}: ${fmtUsd(c.last30Usd)} · ${fmtTokens(c.last30Tokens)} ${t("tokens")}`;
   $("cost-note").textContent = t("costNote");
+
+  scheduleFit();
 }
 
 // ----- Idioma -----
@@ -220,7 +481,21 @@ async function showAbout() {
 }
 async function showSettings() {
   const v = await getVersion();
-  const body =
+  const themeBlock = `<div class="set-label">${t("theme")}</div>
+    <div class="seg" id="theme-seg">
+      <button data-theme-opt="auto">Auto</button>
+      <button data-theme-opt="midnight">Midnight</button>
+      <button data-theme-opt="daylight">Daylight</button>
+    </div>`;
+  const opPct = Math.round(parseFloat(localStorage.getItem("bgOpacity") || "0.45") * 100);
+  const blurPx = parseInt(localStorage.getItem("bgBlur") || "13", 10);
+  const bgBlock = `<div class="set-label">${t("background")}</div>
+    <div class="gallery" id="bg-gallery"></div>
+    <div class="set-label">${t("transparency")}</div>
+    <input type="range" id="bg-op" class="range" min="5" max="85" value="${opPct}" />
+    <div class="set-label">${t("blur")}</div>
+    <input type="range" id="bg-blur" class="range" min="0" max="28" value="${blurPx}" />`;
+  const rows =
     lang === "es"
       ? `<div class="row"><span>Versión</span><span class="muted2">${v}</span></div>
          <div class="row"><span>Cuenta</span><span class="muted2">Claude Code (local)</span></div>
@@ -234,7 +509,49 @@ async function showSettings() {
          <div class="row"><span>Usage refresh</span><span class="muted2">5 min</span></div>
          <div class="row"><span>Cost refresh</span><span class="muted2">60 s</span></div>
          <p class="muted2" style="margin-top:12px">Drag the top bar to move the window.</p>`;
-  openModal(t("settingsTitle"), body);
+  openModal(t("settingsTitle"), themeBlock + bgBlock + rows);
+
+  document.querySelectorAll<HTMLButtonElement>("#theme-seg [data-theme-opt]").forEach((b) => {
+    if (b.dataset.themeOpt === theme) b.classList.add("active");
+    b.addEventListener("click", async () => {
+      document
+        .querySelectorAll("#theme-seg [data-theme-opt]")
+        .forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+      await applyTheme(b.dataset.themeOpt as Theme);
+    });
+  });
+
+  renderGallery();
+  $("bg-op").addEventListener("input", (e) => {
+    const v = parseInt((e.target as HTMLInputElement).value, 10) / 100;
+    localStorage.setItem("bgOpacity", String(v));
+    applyPanelSurface();
+  });
+  $("bg-blur").addEventListener("input", (e) => {
+    localStorage.setItem("bgBlur", (e.target as HTMLInputElement).value);
+    applyBg();
+  });
+}
+
+function showWhyDisconnected() {
+  const body =
+    lang === "es"
+      ? `<p>Claude Bar lee tu token de <b>Claude Code</b> desde
+           <code>~/.claude/.credentials.json</code> para mostrar los límites en vivo.</p>
+         <p class="muted2">En esta PC ese archivo no existe: tu Claude Code guarda la sesión
+           de forma segura (llavero del SO) o la provee el entorno, así que no hay token en
+           texto plano para leer. Por eso Sesión / Semanal quedan en 0%.</p>
+         <p class="muted2"><b>Costo</b> sí funciona: se calcula desde los registros locales de
+           uso, sin necesitar el token.</p>`
+      : `<p>Claude Bar reads your <b>Claude Code</b> token from
+           <code>~/.claude/.credentials.json</code> to show live limits.</p>
+         <p class="muted2">On this PC that file doesn't exist: your Claude Code stores the
+           session securely (OS keychain) or it's provided by the environment, so there's no
+           plaintext token to read. That's why Session / Weekly stay at 0%.</p>
+         <p class="muted2"><b>Cost</b> still works: it's computed from local usage logs, no
+           token needed.</p>`;
+  openModal(t("whyTitle"), body);
 }
 function showLogout() {
   const body =
@@ -256,6 +573,8 @@ async function setCompact(on: boolean) {
     await appWindow.setPosition(new LogicalPosition(12, 12));
   } else {
     await appWindow.setSize(new LogicalSize(FULL.w, FULL.h));
+    lastFitH = FULL.h;
+    scheduleFit();
   }
 }
 
@@ -303,9 +622,27 @@ async function handleAction(act: string) {
 // ----- Arranque -----
 async function main() {
   applyLang();
+  await applyTheme(theme);
+  applyBg();
+
+  // Carga la foto de fondo cuando el usuario la elige.
+  ($("bg-file") as HTMLInputElement).addEventListener("change", (e) => {
+    const f = (e.target as HTMLInputElement).files?.[0];
+    if (f) handleBgFile(f);
+  });
+
+  // El modo Auto sigue el tema del sistema en tiempo real.
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (theme === "auto") applyTheme("auto");
+  });
 
   document.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((btn) => {
     btn.addEventListener("click", () => handleAction(btn.dataset.act || ""));
+  });
+
+  // Al tocar el estado "no conectado", explica por qué.
+  $("updated").addEventListener("click", () => {
+    if (document.body.classList.contains("disconnected")) showWhyDisconnected();
   });
 
   await listen<UsageSnapshot>("usage-updated", (e) => applyUsage(e.payload));

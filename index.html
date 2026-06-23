@@ -6,6 +6,8 @@
     <title>Claude Bar</title>
   </head>
   <body>
+    <div id="bg-photo"></div>
+    <input type="file" id="bg-file" accept="image/*" style="display: none" />
     <div id="panel" class="panel">
       <!-- ===== Barra de titulo (arrastrable) ===== -->
       <header class="titlebar">
@@ -39,6 +41,7 @@
 
         <hr class="rule" />
 
+        <div id="limits-group">
         <section class="block">
           <h2 data-i18n="session">Sesión</h2>
           <div class="bar"><div id="session-fill" class="fill"></div></div>
@@ -78,13 +81,17 @@
         </section>
 
         <hr class="rule" />
+        </div>
 
         <section class="block cost">
           <div class="head-row">
             <h2 data-i18n="cost">Costo</h2>
             <span class="chevron">›</span>
           </div>
-          <div id="cost-today" class="cost-line">—</div>
+          <div class="cost-hero">
+            <span id="cost-today-val" class="cost-hero-val">—</span>
+            <span id="cost-today-sub" class="cost-hero-sub"></span>
+          </div>
           <div id="cost-week" class="cost-line">—</div>
           <div id="cost-30" class="cost-line">—</div>
           <div id="cost-note" class="cost-line subtle"></div>
@@ -93,18 +100,39 @@
         <hr class="rule" />
 
         <section class="actions">
-          <button class="action" data-act="dashboard"><span class="ic">▥</span> <span data-i18n="dashboard">Panel de uso</span></button>
-          <button class="action" data-act="status"><span class="ic">⟋</span> <span data-i18n="status">Estado del servicio</span></button>
-          <button class="action" data-act="refresh"><span class="ic">⟳</span> <span data-i18n="refresh">Actualizar ahora</span></button>
+          <button class="action" data-act="dashboard">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+            <span data-i18n="dashboard">Panel de uso</span>
+          </button>
+          <button class="action" data-act="status">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2.5 6 5-12 2.5 6h4"/></svg>
+            <span data-i18n="status">Estado del servicio</span>
+          </button>
+          <button class="action" data-act="refresh">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.6"/><path d="M18 3.5V8h-4.5"/><path d="M20 12a8 8 0 0 1-13.7 5.6"/><path d="M6 20.5V16h4.5"/></svg>
+            <span data-i18n="refresh">Actualizar ahora</span>
+          </button>
         </section>
 
         <hr class="rule" />
 
         <section class="actions footer">
-          <button class="action plain" data-act="settings"><span class="ic">⚙</span> <span data-i18n="settings">Ajustes</span></button>
-          <button class="action plain" data-act="about"><span class="ic">ⓘ</span> <span data-i18n="about">Acerca de</span></button>
-          <button class="action plain" data-act="logout"><span class="ic">⎋</span> <span data-i18n="logout">Cerrar sesión (Claude)</span></button>
-          <button class="action plain danger" data-act="quit"><span class="ic">⏻</span> <span data-i18n="quit">Cerrar aplicación</span></button>
+          <button class="action plain" data-act="settings">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span data-i18n="settings">Ajustes</span>
+          </button>
+          <button class="action plain" data-act="about">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            <span data-i18n="about">Acerca de</span>
+          </button>
+          <button class="action plain" data-act="logout">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+            <span data-i18n="logout">Cerrar sesión (Claude)</span>
+          </button>
+          <button class="action plain danger" data-act="quit">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v9"/><path d="M7.5 6.5a8 8 0 1 0 9 0"/></svg>
+            <span data-i18n="quit">Cerrar aplicación</span>
+          </button>
           <button class="action plain lang" data-act="lang"><span id="lang-label">English</span></button>
         </section>
       </div>
