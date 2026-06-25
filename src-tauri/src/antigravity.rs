@@ -17,9 +17,15 @@ pub struct AntigravityStatus {
 }
 
 fn db_path() -> Option<PathBuf> {
-    // Windows: %APPDATA%\Antigravity\User\globalStorage\state.vscdb
-    let appdata = std::env::var_os("APPDATA")?;
-    let p = PathBuf::from(appdata)
+    // Carpeta base de config de Antigravity (un fork de VS Code):
+    //   Windows: %APPDATA%\Antigravity
+    //   Linux:   ~/.config/Antigravity
+    let base = if cfg!(windows) {
+        PathBuf::from(std::env::var_os("APPDATA")?)
+    } else {
+        dirs::config_dir()?
+    };
+    let p = base
         .join("Antigravity")
         .join("User")
         .join("globalStorage")

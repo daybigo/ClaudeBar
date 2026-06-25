@@ -12,13 +12,19 @@ static FONT: OnceLock<Option<FontVec>> = OnceLock::new();
 
 fn font() -> Option<&'static FontVec> {
     FONT.get_or_init(|| {
-        // Fuentes del sistema de Windows (negrita para legibilidad pequena).
+        // Negrita para legibilidad a tamano pequeno. Se prueba en orden y se usa
+        // la primera que cargue: primero Windows, luego rutas tipicas de Linux.
         let candidates = [
             r"C:\Windows\Fonts\segoeuib.ttf",
             r"C:\Windows\Fonts\arialbd.ttf",
             r"C:\Windows\Fonts\seguisb.ttf",
             r"C:\Windows\Fonts\segoeui.ttf",
             r"C:\Windows\Fonts\arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
         ];
         for c in candidates {
             if let Ok(bytes) = std::fs::read(c) {
