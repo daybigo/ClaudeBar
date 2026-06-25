@@ -9,9 +9,12 @@
     <div id="panel" class="panel">
       <!-- ===== Barra de titulo (arrastrable) ===== -->
       <header class="titlebar">
-        <div class="tb-drag" data-tauri-drag-region>
-          <span class="tb-pill">✳ Claude</span>
-        </div>
+        <nav class="tabs">
+          <button class="tab" data-provider-tab="claude" data-act="provider:claude">Claude</button>
+          <button class="tab" data-provider-tab="codex" data-act="provider:codex">Codex</button>
+          <button class="tab" data-provider-tab="antigravity" data-act="provider:antigravity">Antigravity</button>
+        </nav>
+        <div class="tb-drag" data-tauri-drag-region></div>
         <div class="tb-buttons">
           <button class="tb-btn" data-act="theme" title="Cambiar tema" aria-label="Tema">
             <svg viewBox="0 0 14 14" width="13" height="13">
@@ -43,6 +46,7 @@
           <div id="updated" class="subtle">Cargando…</div>
         </div>
 
+        <div id="data-sections">
         <hr class="rule" />
 
         <section class="block">
@@ -103,6 +107,11 @@
           <button class="action" data-act="status"><span class="ic">⟋</span> <span data-i18n="status">Estado del servicio</span></button>
           <button class="action" data-act="refresh"><span class="ic">⟳</span> <span data-i18n="refresh">Actualizar ahora</span></button>
         </section>
+        </div>
+
+        <div id="soon" class="soon hidden">
+          <p class="soon-msg" data-i18n="providerSoon">Disponible próximamente</p>
+        </div>
 
         <hr class="rule" />
 

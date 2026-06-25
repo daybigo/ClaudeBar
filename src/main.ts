@@ -6,6 +6,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import { resolveTheme, loadThemeSetting, saveThemeSetting, type ThemeSetting } from "./theme";
+import { loadProvider, saveProvider, PROVIDER_LABELS, type Provider } from "./provider";
 
 // ----- Tipos (coinciden con el backend, camelCase) -----
 interface LimitWindow {
@@ -58,6 +59,7 @@ const I18N: Record<string, Dict> = {
     errNetwork: "Sin conexión, reintentando…",
     errParse: "Respuesta inesperada", errGeneric: "Error temporal, reintentando…",
     theme: "Tema", themeLight: "Claro", themeDark: "Oscuro", themeSystem: "Sistema",
+    providerSoon: "Disponible próximamente",
     aboutTitle: "Acerca de Claude Bar", settingsTitle: "Ajustes", logoutTitle: "Cerrar sesión (Claude)",
   },
   en: {
@@ -75,6 +77,7 @@ const I18N: Record<string, Dict> = {
     errNetwork: "No connection, retrying…",
     errParse: "Unexpected response", errGeneric: "Temporary error, retrying…",
     theme: "Theme", themeLight: "Light", themeDark: "Dark", themeSystem: "System",
+    providerSoon: "Coming soon",
     aboutTitle: "About Claude Bar", settingsTitle: "Settings", logoutTitle: "Log out (Claude)",
   },
 };
@@ -106,6 +109,33 @@ function setTheme(setting: ThemeSetting): void {
   saveThemeSetting(setting);
   applyTheme(setting);
   markThemeSelection(setting);
+}
+
+// ----- Proveedor (Claude / Codex / Antigravity) -----
+function markProviderTab(p: Provider): void {
+  document.querySelectorAll<HTMLElement>("[data-provider-tab]").forEach((el) => {
+    el.classList.toggle("active", el.dataset.providerTab === p);
+  });
+}
+function applyProvider(p: Provider): void {
+  markProviderTab(p);
+  $("provider-title").textContent = PROVIDER_LABELS[p];
+  const isClaude = p === "claude";
+  $("data-sections").classList.toggle("hidden", !isClaude);
+  $("soon").classList.toggle("hidden", isClaude);
+  if (isClaude) {
+    if (lastUsage) applyUsage(lastUsage);
+  } else {
+    // Aún sin backend: estado neutro mientras llega su lectura de datos.
+    $("plan-badge").textContent = "";
+    const updated = $("updated");
+    updated.textContent = t("providerSoon");
+    updated.classList.remove("stale");
+  }
+}
+function setProvider(p: Provider): void {
+  saveProvider(p);
+  applyProvider(p);
 }
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -158,6 +188,8 @@ function weeklyPace(win: LimitWindow): string {
 function applyUsage(u: UsageSnapshot) {
   lastUsage = u;
   lastPlan = u.connected ? u.plan : "";
+  // Cacheamos siempre, pero solo pintamos si Claude es el proveedor activo.
+  if (loadProvider() !== "claude") return;
   $("plan-badge").textContent = lastPlan;
 
   const updated = $("updated");
@@ -309,6 +341,10 @@ async function handleAction(act: string) {
     setTheme(act.slice(6) as ThemeSetting);
     return;
   }
+  if (act.startsWith("provider:")) {
+    setProvider(act.slice(9) as Provider);
+    return;
+  }
   switch (act) {
     case "theme":
       // toggle rápido claro<->oscuro desde la barra de título
@@ -357,6 +393,7 @@ async function handleAction(act: string) {
 async function main() {
   applyLang();
   applyTheme(loadThemeSetting());
+  applyProvider(loadProvider());
 
   // El tema "Sistema" debe seguir al SO en vivo.
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {

@@ -61,6 +61,20 @@ body {
   color: var(--text);
 }
 
+.hidden {
+  display: none;
+}
+
+/* Placeholder para proveedores aun sin backend (Codex / Antigravity) */
+.soon {
+  padding: 48px 12px;
+  text-align: center;
+}
+.soon-msg {
+  color: var(--subtle);
+  font-size: 14px;
+}
+
 .panel {
   width: 100vw;
   height: 100vh;
@@ -94,15 +108,31 @@ body {
   display: flex;
   align-items: center;
 }
-.tb-pill {
-  pointer-events: none;
+/* Pestanas de proveedor (estilo CodexBar) */
+.tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--chip-bg);
+}
+.tab {
+  border: none;
+  background: none;
+  color: var(--subtle);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tab.active {
   background: var(--blue);
   color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 12px;
-  border-radius: 9px;
-  box-shadow: 0 1px 4px rgba(47, 107, 255, 0.35);
 }
 .tb-buttons {
   display: flex;
