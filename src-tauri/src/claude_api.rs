@@ -171,20 +171,24 @@ pub fn fetch(creds: &Credentials) -> FetchResult {
 
     let resp = match resp {
         Ok(r) => r,
-        Err(e) => return FetchResult::Error(format!("red: {e}")),
+        Err(_) => return FetchResult::Error("network".to_string()),
     };
 
+    // Devolvemos CODIGOS de error (el frontend los traduce al idioma del usuario).
     let status = resp.status();
     if status.as_u16() == 429 {
         return FetchResult::RateLimited;
     }
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return FetchResult::Error("session_expired".to_string());
+    }
     if !status.is_success() {
-        return FetchResult::Error(format!("HTTP {}", status.as_u16()));
+        return FetchResult::Error(format!("http_{}", status.as_u16()));
     }
 
     let body: Value = match resp.json() {
         Ok(v) => v,
-        Err(e) => return FetchResult::Error(format!("json: {e}")),
+        Err(_) => return FetchResult::Error("parse_error".to_string()),
     };
 
     let five_hour = body.get("five_hour").and_then(parse_window).unwrap_or_default();

@@ -8,7 +8,7 @@ mod pricing;
 mod tray_icon;
 
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use claude_api::FetchResult;
 use model::{CostReport, UsageSnapshot};
@@ -31,6 +31,8 @@ struct AppState {
     cost: Mutex<CostReport>,
     /// Estado previo para detectar transiciones y disparar notificaciones.
     notify: Mutex<NotifyState>,
+    /// Última vez que consultamos el endpoint de uso (anti-spam / rate-limit).
+    last_usage_fetch: Mutex<Option<Instant>>,
 }
 
 #[derive(Default)]
@@ -69,10 +71,22 @@ fn hide_panel(app: AppHandle) {
 
 #[tauri::command]
 fn refresh_now(app: AppHandle) {
-    let a = app.clone();
-    std::thread::spawn(move || {
-        fetch_usage_update(&a);
-    });
+    // Anti-spam: no re-consultar el endpoint si lo hicimos hace <20s
+    // (ese endpoint limita muy agresivo y los 429 "se pegan").
+    let recent = app
+        .state::<AppState>()
+        .last_usage_fetch
+        .lock()
+        .unwrap()
+        .map(|t| t.elapsed() < Duration::from_secs(20))
+        .unwrap_or(false);
+    if !recent {
+        let a = app.clone();
+        std::thread::spawn(move || {
+            fetch_usage_update(&a);
+        });
+    }
+    // El costo es local y barato: siempre se recalcula.
     let b = app.clone();
     std::thread::spawn(move || {
         let report = cost::compute();
@@ -259,7 +273,7 @@ fn fetch_usage_update(app: &AppHandle) -> Outcome {
             let snap = UsageSnapshot {
                 connected: false,
                 plan: "Claude".to_string(),
-                error: Some("Claude Code no conectado".to_string()),
+                error: Some("not_connected".to_string()),
                 updated_at: chrono::Local::now().to_rfc3339(),
                 ..Default::default()
             };
@@ -270,6 +284,7 @@ fn fetch_usage_update(app: &AppHandle) -> Outcome {
         }
     };
 
+    *state.last_usage_fetch.lock().unwrap() = Some(Instant::now());
     match claude_api::fetch(&creds) {
         FetchResult::Ok(snap) => {
             eprintln!(
@@ -288,7 +303,7 @@ fn fetch_usage_update(app: &AppHandle) -> Outcome {
                 g.connected = true;
                 g.plan = creds.plan.clone();
                 g.stale = true;
-                g.error = Some("Limite de peticiones (reintentando)".to_string());
+                g.error = Some("rate_limited".to_string());
                 g.clone()
             };
             let _ = app.emit("usage-updated", snap);
@@ -366,6 +381,7 @@ pub fn run() {
             usage: Mutex::new(UsageSnapshot::default()),
             cost: Mutex::new(CostReport::default()),
             notify: Mutex::new(NotifyState::default()),
+            last_usage_fetch: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             get_usage,
