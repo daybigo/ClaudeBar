@@ -59,9 +59,10 @@ const I18N: Record<string, Dict> = {
     errNetwork: "Sin conexión, reintentando…",
     errParse: "Respuesta inesperada", errGeneric: "Error temporal, reintentando…",
     theme: "Tema", themeLight: "Claro", themeDark: "Oscuro", themeSystem: "Sistema",
-    providerSoon: "Disponible próximamente",
     connected: "conectado", notConnected: "no conectado",
-    providerNoUsage: "Este proveedor no expone uso por sesión",
+    open: "Abrir", loadingProvider: "Cargando…",
+    usageOnlyClaude: "El uso por sesión solo está disponible para Claude por ahora.",
+    connectHint: "Inicia sesión en {p} para conectarlo.",
     aboutTitle: "Acerca de Claude Bar", settingsTitle: "Ajustes", logoutTitle: "Cerrar sesión (Claude)",
   },
   en: {
@@ -79,9 +80,10 @@ const I18N: Record<string, Dict> = {
     errNetwork: "No connection, retrying…",
     errParse: "Unexpected response", errGeneric: "Temporary error, retrying…",
     theme: "Theme", themeLight: "Light", themeDark: "Dark", themeSystem: "System",
-    providerSoon: "Coming soon",
     connected: "connected", notConnected: "not connected",
-    providerNoUsage: "This provider doesn't expose per-session usage",
+    open: "Open", loadingProvider: "Loading…",
+    usageOnlyClaude: "Per-session usage is only available for Claude for now.",
+    connectHint: "Sign in to {p} to connect it.",
     aboutTitle: "About Claude Bar", settingsTitle: "Settings", logoutTitle: "Log out (Claude)",
   },
 };
@@ -126,11 +128,42 @@ interface ProviderStatus {
   email: string;
   plan: string;
 }
-// Proveedores externos (Codex/Antigravity): muestran plan + email vía su comando.
+// Proveedores externos (Codex/Antigravity): muestran una tarjeta de cuenta.
 const EXTERNAL_CMD: Partial<Record<Provider, string>> = {
   codex: "get_codex",
   antigravity: "get_antigravity",
 };
+const PROVIDER_COLOR: Record<Provider, string> = {
+  claude: "#f0a24a",
+  codex: "#10a37f", // verde OpenAI
+  antigravity: "#4285f4", // azul Google
+};
+const PROVIDER_OPEN: Partial<Record<Provider, string>> = {
+  codex: "https://chatgpt.com",
+  antigravity: "https://antigravity.google",
+};
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+
+function providerCard(p: Provider, st: ProviderStatus): string {
+  const label = PROVIDER_LABELS[p];
+  const initial = esc(label.charAt(0));
+  if (!st.connected) {
+    return `<div class="pcard">
+        <div class="pemblem off">${initial}</div>
+        <div class="pplan">${t("notConnected")}</div>
+        <p class="pnote">${t("connectHint").replace("{p}", esc(label))}</p>
+      </div>`;
+  }
+  const url = PROVIDER_OPEN[p];
+  return `<div class="pcard">
+      <div class="pemblem" style="background:${PROVIDER_COLOR[p]}">${initial}</div>
+      <div class="pplan">${esc(st.plan)}</div>
+      ${st.email ? `<div class="pemail">${esc(st.email)}</div>` : ""}
+      ${url ? `<button class="pcard-btn" data-act="open:${url}">${t("open")} ${esc(label)} ↗</button>` : ""}
+      <p class="pnote">${t("usageOnlyClaude")}</p>
+    </div>`;
+}
+
 async function refreshExternal(p: Provider, command: string): Promise<void> {
   let st: ProviderStatus = { connected: false, email: "", plan: "" };
   try {
@@ -142,12 +175,8 @@ async function refreshExternal(p: Provider, command: string): Promise<void> {
   $("plan-badge").textContent = st.connected ? st.plan : "";
   const updated = $("updated");
   updated.classList.remove("stale");
-  updated.textContent = st.connected
-    ? st.email
-      ? `${t("connected")} · ${st.email}`
-      : t("connected")
-    : t("notConnected");
-  $("soon-msg").textContent = st.connected ? t("providerNoUsage") : t("notConnected");
+  updated.textContent = st.connected ? t("connected") : t("notConnected");
+  $("soon").innerHTML = providerCard(p, st);
 }
 
 function applyProvider(p: Provider): void {
@@ -163,7 +192,7 @@ function applyProvider(p: Provider): void {
   const cmd = EXTERNAL_CMD[p];
   if (cmd) {
     $("plan-badge").textContent = "";
-    $("soon-msg").textContent = t("providerSoon"); // mientras llega la respuesta
+    $("soon").innerHTML = `<div class="pcard"><p class="pnote">${t("loadingProvider")}</p></div>`;
     void refreshExternal(p, cmd);
   }
 }
@@ -380,6 +409,10 @@ async function handleAction(act: string) {
   }
   if (act.startsWith("provider:")) {
     setProvider(act.slice(9) as Provider);
+    return;
+  }
+  if (act.startsWith("open:")) {
+    void openUrl(act.slice(5)).catch((e) => console.error("open:", e));
     return;
   }
   switch (act) {
