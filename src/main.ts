@@ -60,6 +60,8 @@ const I18N: Record<string, Dict> = {
     errParse: "Respuesta inesperada", errGeneric: "Error temporal, reintentando…",
     theme: "Tema", themeLight: "Claro", themeDark: "Oscuro", themeSystem: "Sistema",
     providerSoon: "Disponible próximamente",
+    connected: "conectado", notConnected: "no conectado",
+    providerNoUsage: "Este proveedor no expone uso por sesión",
     aboutTitle: "Acerca de Claude Bar", settingsTitle: "Ajustes", logoutTitle: "Cerrar sesión (Claude)",
   },
   en: {
@@ -78,6 +80,8 @@ const I18N: Record<string, Dict> = {
     errParse: "Unexpected response", errGeneric: "Temporary error, retrying…",
     theme: "Theme", themeLight: "Light", themeDark: "Dark", themeSystem: "System",
     providerSoon: "Coming soon",
+    connected: "connected", notConnected: "not connected",
+    providerNoUsage: "This provider doesn't expose per-session usage",
     aboutTitle: "About Claude Bar", settingsTitle: "Settings", logoutTitle: "Log out (Claude)",
   },
 };
@@ -117,6 +121,30 @@ function markProviderTab(p: Provider): void {
     el.classList.toggle("active", el.dataset.providerTab === p);
   });
 }
+interface AntigravityStatus {
+  connected: boolean;
+  email: string;
+  plan: string;
+}
+async function refreshAntigravity(): Promise<void> {
+  let st: AntigravityStatus = { connected: false, email: "", plan: "" };
+  try {
+    st = await invoke<AntigravityStatus>("get_antigravity");
+  } catch (e) {
+    console.error("get_antigravity:", e);
+  }
+  if (loadProvider() !== "antigravity") return; // el usuario cambió mientras tanto
+  $("plan-badge").textContent = st.connected ? st.plan : "";
+  const updated = $("updated");
+  updated.classList.remove("stale");
+  updated.textContent = st.connected
+    ? st.email
+      ? `${t("connected")} · ${st.email}`
+      : t("connected")
+    : t("notConnected");
+  $("soon-msg").textContent = st.connected ? t("providerNoUsage") : t("notConnected");
+}
+
 function applyProvider(p: Provider): void {
   markProviderTab(p);
   $("provider-title").textContent = PROVIDER_LABELS[p];
@@ -125,13 +153,18 @@ function applyProvider(p: Provider): void {
   $("soon").classList.toggle("hidden", isClaude);
   if (isClaude) {
     if (lastUsage) applyUsage(lastUsage);
-  } else {
-    // Aún sin backend: estado neutro mientras llega su lectura de datos.
-    $("plan-badge").textContent = "";
-    const updated = $("updated");
-    updated.textContent = t("providerSoon");
-    updated.classList.remove("stale");
+    return;
   }
+  if (p === "antigravity") {
+    void refreshAntigravity();
+    return;
+  }
+  // Codex: aún sin backend (incremento 2c).
+  $("plan-badge").textContent = "";
+  const updated = $("updated");
+  updated.textContent = t("providerSoon");
+  updated.classList.remove("stale");
+  $("soon-msg").textContent = t("providerSoon");
 }
 function setProvider(p: Provider): void {
   saveProvider(p);
@@ -258,6 +291,7 @@ function applyLang() {
   document.documentElement.lang = lang;
   if (lastUsage) applyUsage(lastUsage);
   if (lastCost) applyCost(lastCost);
+  applyProvider(loadProvider());
 }
 function toggleLang() {
   lang = lang === "es" ? "en" : "es";
@@ -393,7 +427,6 @@ async function handleAction(act: string) {
 async function main() {
   applyLang();
   applyTheme(loadThemeSetting());
-  applyProvider(loadProvider());
 
   // El tema "Sistema" debe seguir al SO en vivo.
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {

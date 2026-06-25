@@ -1,11 +1,13 @@
 //! Claude Bar: monitor de uso de Claude para la bandeja de Windows.
 
+mod antigravity;
 mod claude_api;
 mod cost;
 mod credentials;
 mod model;
 mod pricing;
 mod tray_icon;
+mod vscdb;
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -55,6 +57,11 @@ fn get_usage(state: tauri::State<AppState>) -> UsageSnapshot {
 #[tauri::command]
 fn get_cost(state: tauri::State<AppState>) -> CostReport {
     state.cost.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn get_antigravity() -> antigravity::AntigravityStatus {
+    antigravity::read()
 }
 
 #[tauri::command]
@@ -386,6 +393,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_usage,
             get_cost,
+            get_antigravity,
             refresh_now,
             quit,
             hide_panel
