@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Instalar dependencias del frontend
+        run: npm install
+
+      - name: Typecheck del frontend
+        run: npx tsc --noEmit
+
+      - name: Tests del frontend
+        run: npm test
+
+      - name: Tests del backend (Rust)
+        run: cargo test --lib
+        working-directory: src-tauri

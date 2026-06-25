@@ -1,0 +1,43 @@
+name: release
+
+# Construye el instalador de Windows y publica una release al empujar un tag vX.Y.Z.
+# En los runners de GitHub usamos la toolchain MSVC (preinstalada), no la GNU local.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache de cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Instalar dependencias del frontend
+        run: npm install
+
+      - name: Construir y publicar la release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Claude Bar ${{ github.ref_name }}"
+          releaseBody: "Instalador de Windows (NSIS) abajo. Tambien: `irm https://raw.githubusercontent.com/daybigo/ClaudeBar/main/install.ps1 | iex`"
+          releaseDraft: false
+          prerelease: false

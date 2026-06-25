@@ -34,7 +34,19 @@ Una pequeña app tipo *menu bar* para Windows que muestra cuánto has usado de t
 
 **Requisitos:** Windows 10/11 y **Claude Code** instalado e iniciado sesión (Claude Bar lee tu sesión local de Claude Code — ver *Cómo funciona*).
 
-1. Descarga el instalador `Claude Bar_0.1.0_x64-setup.exe` desde [**Releases**](https://github.com/daybigo/ClaudeBar/releases/latest).
+### Instalar por comando (recomendado)
+
+En PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/daybigo/ClaudeBar/main/install.ps1 | iex
+```
+
+Descarga la última release y ejecuta el instalador (en tu usuario, sin admin).
+
+### Instalación manual
+
+1. Descarga el instalador `Claude Bar_*_x64-setup.exe` desde [**Releases**](https://github.com/daybigo/ClaudeBar/releases/latest).
 2. Ejecútalo (se instala en tu usuario, sin admin). SmartScreen de Windows puede avisar por ser una app sin firmar → **Más información → Ejecutar de todas formas**.
 3. El panel aparece la primera vez; después vive en la bandeja. Puede iniciar con Windows (se activa en el menú del icono).
 
