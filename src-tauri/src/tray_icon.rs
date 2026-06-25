@@ -130,6 +130,33 @@ fn draw_text(buf: &mut [u8], text: &str, font: &FontVec) {
     }
 }
 
+/// Icono con una etiqueta corta (p.ej. la inicial del proveedor) sobre un fondo
+/// de color. Para proveedores que no exponen % de sesion (Codex, Antigravity).
+pub fn render_label(label: &str, bg: [u8; 3]) -> Image<'static> {
+    let mut buf = vec![0u8; (SIZE * SIZE * 4) as usize];
+    fill_rounded(&mut buf, bg, 7.0);
+    if let Some(f) = font() {
+        draw_text(&mut buf, label, f);
+    }
+    Image::new_owned(buf, SIZE, SIZE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_label_pinta_el_fondo_de_marca() {
+        let img = render_label("C", [16, 163, 127]); // verde OpenAI
+        let rgba = img.rgba();
+        // pixel solidamente dentro del rectangulo, lejos de la letra central
+        let idx = ((16 * SIZE + 5) * 4) as usize;
+        assert!(rgba[idx + 3] > 200, "el icono debe ser opaco (no vacio)");
+        assert!(rgba[idx + 1] > 120, "predomina el verde de marca");
+        assert!(rgba[idx] < 90, "rojo bajo");
+    }
+}
+
 /// Crea el icono. `percent` = utilizacion de la sesion (0-100) o None si no hay
 /// datos todavia.
 pub fn render(percent: Option<f64>) -> Image<'static> {

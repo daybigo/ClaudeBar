@@ -36,6 +36,8 @@ struct AppState {
     notify: Mutex<NotifyState>,
     /// Última vez que consultamos el endpoint de uso (anti-spam / rate-limit).
     last_usage_fetch: Mutex<Option<Instant>>,
+    /// Proveedor seleccionado en la UI; define qué muestra el icono de bandeja.
+    provider: Mutex<String>,
 }
 
 #[derive(Default)]
@@ -68,6 +70,12 @@ fn get_antigravity() -> antigravity::AntigravityStatus {
 #[tauri::command]
 fn get_codex() -> codex::CodexStatus {
     codex::read()
+}
+
+#[tauri::command]
+fn set_provider(app: AppHandle, provider: String) {
+    *app.state::<AppState>().provider.lock().unwrap() = provider;
+    refresh_tray_for_provider(&app);
 }
 
 #[tauri::command]
@@ -196,6 +204,54 @@ fn update_tray(app: &AppHandle, percent: Option<f64>, tip: &str) {
     }
 }
 
+fn update_tray_label(app: &AppHandle, label: &str, bg: [u8; 3], tip: &str) {
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_icon(Some(tray_icon::render_label(label, bg)));
+        let _ = tray.set_tooltip(Some(tip));
+    }
+}
+
+fn provider_is_claude(app: &AppHandle) -> bool {
+    app.state::<AppState>().provider.lock().unwrap().as_str() == "claude"
+}
+
+/// Repinta el icono de bandeja segun el proveedor seleccionado. Claude muestra
+/// el % de sesion; Codex/Antigravity muestran su inicial (no exponen % local).
+fn refresh_tray_for_provider(app: &AppHandle) {
+    let provider = app.state::<AppState>().provider.lock().unwrap().clone();
+    match provider.as_str() {
+        "codex" => {
+            let st = codex::read();
+            let bg = if st.connected { [16, 163, 127] } else { [120, 120, 130] };
+            let tip = if st.connected {
+                format!("Codex — {}", st.plan)
+            } else {
+                "Codex — no conectado".to_string()
+            };
+            update_tray_label(app, "C", bg, &tip);
+        }
+        "antigravity" => {
+            let st = antigravity::read();
+            let bg = if st.connected { [66, 133, 244] } else { [120, 120, 130] };
+            let tip = if st.connected {
+                format!("Antigravity — {}", st.plan)
+            } else {
+                "Antigravity — no conectado".to_string()
+            };
+            update_tray_label(app, "A", bg, &tip);
+        }
+        _ => {
+            let snap = app.state::<AppState>().usage.lock().unwrap().clone();
+            let pct = if snap.connected {
+                Some(snap.five_hour.utilization)
+            } else {
+                None
+            };
+            update_tray(app, pct, &tooltip(&snap));
+        }
+    }
+}
+
 fn send_notification(app: &AppHandle, title: &str, body: &str) {
     let _ = app.notification().builder().title(title).body(body).show();
 }
@@ -291,7 +347,9 @@ fn fetch_usage_update(app: &AppHandle) -> Outcome {
                 ..Default::default()
             };
             *state.usage.lock().unwrap() = snap.clone();
-            update_tray(app, None, &tooltip(&snap));
+            if provider_is_claude(app) {
+                update_tray(app, None, &tooltip(&snap));
+            }
             let _ = app.emit("usage-updated", snap);
             return Outcome::Error;
         }
@@ -305,7 +363,9 @@ fn fetch_usage_update(app: &AppHandle) -> Outcome {
                 snap.five_hour.utilization, snap.seven_day.utilization, snap.plan
             );
             *state.usage.lock().unwrap() = snap.clone();
-            update_tray(app, Some(snap.five_hour.utilization), &tooltip(&snap));
+            if provider_is_claude(app) {
+                update_tray(app, Some(snap.five_hour.utilization), &tooltip(&snap));
+            }
             check_notifications(app, &snap);
             let _ = app.emit("usage-updated", snap);
             Outcome::Ok
@@ -338,7 +398,9 @@ fn fetch_usage_update(app: &AppHandle) -> Outcome {
             } else {
                 Some(snap.five_hour.utilization)
             };
-            update_tray(app, pct, &tooltip(&snap));
+            if provider_is_claude(app) {
+                update_tray(app, pct, &tooltip(&snap));
+            }
             Outcome::Error
         }
     }
@@ -395,12 +457,14 @@ pub fn run() {
             cost: Mutex::new(CostReport::default()),
             notify: Mutex::new(NotifyState::default()),
             last_usage_fetch: Mutex::new(None),
+            provider: Mutex::new("claude".to_string()),
         })
         .invoke_handler(tauri::generate_handler![
             get_usage,
             get_cost,
             get_antigravity,
             get_codex,
+            set_provider,
             refresh_now,
             quit,
             hide_panel

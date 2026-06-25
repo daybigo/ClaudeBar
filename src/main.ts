@@ -170,6 +170,8 @@ function applyProvider(p: Provider): void {
 function setProvider(p: Provider): void {
   saveProvider(p);
   applyProvider(p);
+  // Sincroniza la bandeja de Windows con el proveedor elegido.
+  void invoke("set_provider", { provider: p }).catch((e) => console.error("set_provider:", e));
 }
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -439,6 +441,9 @@ async function main() {
     const el = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
     if (el) handleAction(el.dataset.act || "");
   });
+
+  // Sincroniza la bandeja con el proveedor persistido al arrancar.
+  void invoke("set_provider", { provider: loadProvider() }).catch(() => {});
 
   await listen<UsageSnapshot>("usage-updated", (e) => applyUsage(e.payload));
   await listen<CostReport>("cost-updated", (e) => applyCost(e.payload));
