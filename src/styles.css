@@ -1,14 +1,47 @@
 :root {
-  --text: #ffffff; /* texto e iconos en blanco */
-  --muted: rgba(255, 255, 255, 0.82);
-  --subtle: rgba(255, 255, 255, 0.64);
-  --rule: rgba(255, 255, 255, 0.2);
-  --track: rgba(255, 255, 255, 0.26);
+  /* compartidos (no cambian con el tema) */
   --orange: #f0a24a;
   --blue: #2f6bff;
   --danger: #ff8a82;
-  --hover: rgba(255, 255, 255, 0.14);
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+
+  /* === Tema OSCURO (por defecto) === */
+  --text: #f3f4f8;
+  --muted: rgba(255, 255, 255, 0.78);
+  --subtle: rgba(255, 255, 255, 0.55);
+  --rule: rgba(255, 255, 255, 0.14);
+  --track: rgba(255, 255, 255, 0.18);
+  --hover: rgba(255, 255, 255, 0.1);
+  --panel-bg: rgba(24, 26, 38, 0.62);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --panel-inset: rgba(255, 255, 255, 0.1);
+  --chip-bg: rgba(255, 255, 255, 0.14);
+  --chip-bg-hover: rgba(255, 255, 255, 0.26);
+  --chip-border: rgba(255, 255, 255, 0.28);
+  --modal-bg: linear-gradient(160deg, rgba(40, 44, 62, 0.96), rgba(28, 32, 48, 0.94));
+  --modal-border: rgba(255, 255, 255, 0.14);
+  --modal-chip: rgba(255, 255, 255, 0.14);
+  --modal-chip-hover: rgba(255, 255, 255, 0.26);
+}
+
+/* === Tema CLARO === */
+:root[data-theme="light"] {
+  --text: #2b2e3a;
+  --muted: #595c69;
+  --subtle: #7b7e8b;
+  --rule: rgba(60, 65, 100, 0.14);
+  --track: rgba(60, 65, 100, 0.16);
+  --hover: rgba(70, 80, 130, 0.1);
+  --panel-bg: rgba(248, 250, 255, 0.72);
+  --panel-border: rgba(255, 255, 255, 0.7);
+  --panel-inset: rgba(255, 255, 255, 0.85);
+  --chip-bg: rgba(255, 255, 255, 0.5);
+  --chip-bg-hover: rgba(255, 255, 255, 0.82);
+  --chip-border: rgba(120, 130, 170, 0.4);
+  --modal-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(243, 245, 255, 0.94));
+  --modal-border: rgba(255, 255, 255, 0.8);
+  --modal-chip: rgba(60, 70, 120, 0.1);
+  --modal-chip-hover: rgba(60, 70, 120, 0.2);
 }
 
 * {
@@ -35,12 +68,12 @@ body {
   display: flex;
   flex-direction: column;
   border-radius: 14px;
-  /* glassmorphism: fondo claro a 30% de opacidad + blur de 7px (más glass) */
-  background: rgba(247, 249, 255, 0.3);
+  /* glassmorphism: el color depende del tema (variables); blur de 7px */
+  background: var(--panel-bg);
   backdrop-filter: blur(7px);
   -webkit-backdrop-filter: blur(7px);
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--panel-border);
+  box-shadow: inset 0 1px 0 var(--panel-inset);
   overflow-y: auto;
 }
 .panel::-webkit-scrollbar {
@@ -78,10 +111,10 @@ body {
 .tb-btn {
   width: 28px;
   height: 25px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  border: 1px solid var(--chip-border);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
+  background: var(--chip-bg);
+  color: var(--text);
   font-size: 16px;
   font-weight: 700;
   line-height: 1;
@@ -91,7 +124,7 @@ body {
   justify-content: center;
 }
 .tb-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--chip-bg-hover);
 }
 
 /* ---------- Encabezado ---------- */
@@ -110,10 +143,10 @@ body {
 }
 .plan {
   font-size: 12.5px;
-  color: #ffffff;
+  color: var(--text);
   font-weight: 600;
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.32);
+  background: var(--chip-bg);
+  border: 1px solid var(--chip-border);
   padding: 2px 9px;
   border-radius: 8px;
   white-space: nowrap;
@@ -279,10 +312,10 @@ body.compact #compact-view {
   pointer-events: auto;
   width: 22px;
   height: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  border: 1px solid var(--chip-border);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
+  background: var(--chip-bg);
+  color: var(--text);
   cursor: pointer;
   font-size: 12px;
   display: flex;
@@ -290,7 +323,7 @@ body.compact #compact-view {
   justify-content: center;
 }
 .cv-expand:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--chip-bg-hover);
 }
 
 /* ---------- Modal (Acerca de / Ajustes / Login) ---------- */
@@ -313,8 +346,8 @@ body.compact #compact-view {
   width: 100%;
   max-height: 100%;
   overflow-y: auto;
-  background: linear-gradient(160deg, rgba(40, 44, 62, 0.96), rgba(28, 32, 48, 0.94));
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: var(--modal-bg);
+  border: 1px solid var(--modal-border);
   border-radius: 12px;
   padding: 18px;
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4);
@@ -359,13 +392,13 @@ body.compact #compact-view {
   height: 26px;
   border: none;
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--modal-chip);
   color: var(--text);
   cursor: pointer;
   font-size: 12px;
 }
 .modal-x:hover {
-  background: rgba(255, 255, 255, 0.26);
+  background: var(--modal-chip-hover);
 }
 .modal-btn {
   margin-top: 12px;
@@ -380,7 +413,7 @@ body.compact #compact-view {
   cursor: pointer;
 }
 .modal-btn.secondary {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--modal-chip);
   color: var(--text);
 }
 .modal-btn.danger {
@@ -396,4 +429,30 @@ body.compact #compact-view {
   background: rgba(255, 255, 255, 0.1);
   font-size: 12.5px;
   color: var(--text);
+}
+
+/* ---------- Selector de tema (control segmentado) ---------- */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--modal-chip);
+}
+.seg-btn {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.seg-btn:hover {
+  color: var(--text);
+}
+.seg-btn.active {
+  background: var(--blue);
+  color: #fff;
 }

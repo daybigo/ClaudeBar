@@ -5,6 +5,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
+import { resolveTheme, loadThemeSetting, saveThemeSetting, type ThemeSetting } from "./theme";
 
 // ----- Tipos (coinciden con el backend, camelCase) -----
 interface LimitWindow {
@@ -52,6 +53,11 @@ const I18N: Record<string, Dict> = {
     costNote: "≈ valor equivalente en API · tu plan lo cubre",
     thisMonth: "Este mes", updatedJust: "actualizado recién", ago: "hace",
     connect: "Conecta Claude Code para ver tu uso", langBtn: "English",
+    errExpired: "Sesión expirada — abre Claude Code para renovar",
+    errRate: "Muchas consultas, reintentando…",
+    errNetwork: "Sin conexión, reintentando…",
+    errParse: "Respuesta inesperada", errGeneric: "Error temporal, reintentando…",
+    theme: "Tema", themeLight: "Claro", themeDark: "Oscuro", themeSystem: "Sistema",
     aboutTitle: "Acerca de Claude Bar", settingsTitle: "Ajustes", logoutTitle: "Cerrar sesión (Claude)",
   },
   en: {
@@ -64,11 +70,43 @@ const I18N: Record<string, Dict> = {
     costNote: "≈ API-equivalent value · covered by your plan",
     thisMonth: "This month", updatedJust: "updated just now", ago: "ago",
     connect: "Connect Claude Code to see your usage", langBtn: "Español",
+    errExpired: "Session expired — open Claude Code to renew",
+    errRate: "Too many requests, retrying…",
+    errNetwork: "No connection, retrying…",
+    errParse: "Unexpected response", errGeneric: "Temporary error, retrying…",
+    theme: "Theme", themeLight: "Light", themeDark: "Dark", themeSystem: "System",
     aboutTitle: "About Claude Bar", settingsTitle: "Settings", logoutTitle: "Log out (Claude)",
   },
 };
 let lang = localStorage.getItem("lang") === "en" ? "en" : "es";
 const t = (k: string) => I18N[lang][k] ?? k;
+function errText(code: string): string {
+  const m: Record<string, string> = {
+    session_expired: t("errExpired"),
+    rate_limited: t("errRate"),
+    network: t("errNetwork"),
+    parse_error: t("errParse"),
+  };
+  return m[code] ?? t("errGeneric");
+}
+
+// ----- Tema (claro / oscuro / sistema) -----
+function prefersDark(): boolean {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+function applyTheme(setting: ThemeSetting): void {
+  document.documentElement.setAttribute("data-theme", resolveTheme(setting, prefersDark()));
+}
+function markThemeSelection(setting: ThemeSetting): void {
+  document.querySelectorAll<HTMLElement>("[data-theme-opt]").forEach((el) => {
+    el.classList.toggle("active", el.dataset.themeOpt === setting);
+  });
+}
+function setTheme(setting: ThemeSetting): void {
+  saveThemeSetting(setting);
+  applyTheme(setting);
+  markThemeSelection(setting);
+}
 
 const $ = (id: string) => document.getElementById(id)!;
 const appWindow = getCurrentWindow();
@@ -127,7 +165,7 @@ function applyUsage(u: UsageSnapshot) {
     updated.textContent = t("connect");
     updated.classList.add("stale");
   } else if (u.error && u.stale) {
-    updated.textContent = `${u.plan} · ${u.error}`;
+    updated.textContent = u.plan ? `${u.plan} · ${errText(u.error)}` : errText(u.error);
     updated.classList.add("stale");
   } else {
     lastUpdatedIso = u.updatedAt;
@@ -220,7 +258,13 @@ async function showAbout() {
 }
 async function showSettings() {
   const v = await getVersion();
-  const body =
+  const themeRow = `<div class="row"><span>${t("theme")}</span>
+       <span class="seg">
+         <button class="seg-btn" data-theme-opt="light" data-act="theme:light">${t("themeLight")}</button>
+         <button class="seg-btn" data-theme-opt="dark" data-act="theme:dark">${t("themeDark")}</button>
+         <button class="seg-btn" data-theme-opt="system" data-act="theme:system">${t("themeSystem")}</button>
+       </span></div>`;
+  const rows =
     lang === "es"
       ? `<div class="row"><span>Versión</span><span class="muted2">${v}</span></div>
          <div class="row"><span>Cuenta</span><span class="muted2">Claude Code (local)</span></div>
@@ -234,7 +278,8 @@ async function showSettings() {
          <div class="row"><span>Usage refresh</span><span class="muted2">5 min</span></div>
          <div class="row"><span>Cost refresh</span><span class="muted2">60 s</span></div>
          <p class="muted2" style="margin-top:12px">Drag the top bar to move the window.</p>`;
-  openModal(t("settingsTitle"), body);
+  openModal(t("settingsTitle"), themeRow + rows);
+  markThemeSelection(loadThemeSetting());
 }
 function showLogout() {
   const body =
@@ -260,7 +305,15 @@ async function setCompact(on: boolean) {
 }
 
 async function handleAction(act: string) {
+  if (act.startsWith("theme:")) {
+    setTheme(act.slice(6) as ThemeSetting);
+    return;
+  }
   switch (act) {
+    case "theme":
+      // toggle rápido claro<->oscuro desde la barra de título
+      setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
+      break;
     case "minimize":
       await appWindow.hide();
       break;
@@ -303,9 +356,17 @@ async function handleAction(act: string) {
 // ----- Arranque -----
 async function main() {
   applyLang();
+  applyTheme(loadThemeSetting());
 
-  document.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((btn) => {
-    btn.addEventListener("click", () => handleAction(btn.dataset.act || ""));
+  // El tema "Sistema" debe seguir al SO en vivo.
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (loadThemeSetting() === "system") applyTheme("system");
+  });
+
+  // Delegación: cubre botones presentes y los que se crean dentro del modal.
+  document.addEventListener("click", (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
+    if (el) handleAction(el.dataset.act || "");
   });
 
   await listen<UsageSnapshot>("usage-updated", (e) => applyUsage(e.payload));
