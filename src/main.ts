@@ -121,19 +121,24 @@ function markProviderTab(p: Provider): void {
     el.classList.toggle("active", el.dataset.providerTab === p);
   });
 }
-interface AntigravityStatus {
+interface ProviderStatus {
   connected: boolean;
   email: string;
   plan: string;
 }
-async function refreshAntigravity(): Promise<void> {
-  let st: AntigravityStatus = { connected: false, email: "", plan: "" };
+// Proveedores externos (Codex/Antigravity): muestran plan + email vía su comando.
+const EXTERNAL_CMD: Partial<Record<Provider, string>> = {
+  codex: "get_codex",
+  antigravity: "get_antigravity",
+};
+async function refreshExternal(p: Provider, command: string): Promise<void> {
+  let st: ProviderStatus = { connected: false, email: "", plan: "" };
   try {
-    st = await invoke<AntigravityStatus>("get_antigravity");
+    st = await invoke<ProviderStatus>(command);
   } catch (e) {
-    console.error("get_antigravity:", e);
+    console.error(command, e);
   }
-  if (loadProvider() !== "antigravity") return; // el usuario cambió mientras tanto
+  if (loadProvider() !== p) return; // el usuario cambió mientras tanto
   $("plan-badge").textContent = st.connected ? st.plan : "";
   const updated = $("updated");
   updated.classList.remove("stale");
@@ -155,16 +160,12 @@ function applyProvider(p: Provider): void {
     if (lastUsage) applyUsage(lastUsage);
     return;
   }
-  if (p === "antigravity") {
-    void refreshAntigravity();
-    return;
+  const cmd = EXTERNAL_CMD[p];
+  if (cmd) {
+    $("plan-badge").textContent = "";
+    $("soon-msg").textContent = t("providerSoon"); // mientras llega la respuesta
+    void refreshExternal(p, cmd);
   }
-  // Codex: aún sin backend (incremento 2c).
-  $("plan-badge").textContent = "";
-  const updated = $("updated");
-  updated.textContent = t("providerSoon");
-  updated.classList.remove("stale");
-  $("soon-msg").textContent = t("providerSoon");
 }
 function setProvider(p: Provider): void {
   saveProvider(p);

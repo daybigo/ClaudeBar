@@ -2,6 +2,7 @@
 
 mod antigravity;
 mod claude_api;
+mod codex;
 mod cost;
 mod credentials;
 mod model;
@@ -62,6 +63,11 @@ fn get_cost(state: tauri::State<AppState>) -> CostReport {
 #[tauri::command]
 fn get_antigravity() -> antigravity::AntigravityStatus {
     antigravity::read()
+}
+
+#[tauri::command]
+fn get_codex() -> codex::CodexStatus {
+    codex::read()
 }
 
 #[tauri::command]
@@ -394,6 +400,7 @@ pub fn run() {
             get_usage,
             get_cost,
             get_antigravity,
+            get_codex,
             refresh_now,
             quit,
             hide_panel
