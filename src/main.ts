@@ -60,8 +60,8 @@ const I18N: Record<string, Dict> = {
     errParse: "Respuesta inesperada", errGeneric: "Error temporal, reintentando…",
     theme: "Tema", themeLight: "Claro", themeDark: "Oscuro", themeSystem: "Sistema",
     connected: "conectado", notConnected: "no conectado",
-    open: "Abrir", loadingProvider: "Cargando…",
-    usageOnlyClaude: "El uso por sesión solo está disponible para Claude por ahora.",
+    open: "Abrir", loadingProvider: "Cargando…", monthly: "Mes",
+    usageNotHere: "Sin datos de uso para este proveedor.",
     connectHint: "Inicia sesión en {p} para conectarlo.",
     aboutTitle: "Acerca de Claude Bar", settingsTitle: "Ajustes", logoutTitle: "Cerrar sesión (Claude)",
   },
@@ -81,8 +81,8 @@ const I18N: Record<string, Dict> = {
     errParse: "Unexpected response", errGeneric: "Temporary error, retrying…",
     theme: "Theme", themeLight: "Light", themeDark: "Dark", themeSystem: "System",
     connected: "connected", notConnected: "not connected",
-    open: "Open", loadingProvider: "Loading…",
-    usageOnlyClaude: "Per-session usage is only available for Claude for now.",
+    open: "Open", loadingProvider: "Loading…", monthly: "Month",
+    usageNotHere: "No usage data for this provider.",
     connectHint: "Sign in to {p} to connect it.",
     aboutTitle: "About Claude Bar", settingsTitle: "Settings", logoutTitle: "Log out (Claude)",
   },
@@ -123,10 +123,49 @@ function markProviderTab(p: Provider): void {
     el.classList.toggle("active", el.dataset.providerTab === p);
   });
 }
+interface UsageWindow {
+  usedPercent: number;
+  windowMinutes: number;
+  resetsAt: number; // epoch en segundos
+}
 interface ProviderStatus {
   connected: boolean;
   email: string;
   plan: string;
+  primary?: UsageWindow | null;
+  secondary?: UsageWindow | null;
+}
+function windowLabel(mins: number): string {
+  if (mins <= 360) return t("session");
+  if (mins <= 11000) return t("weekly");
+  return t("monthly");
+}
+function resetLabel(epochSec: number): string {
+  if (!epochSec) return "";
+  const ms = epochSec * 1000 - Date.now();
+  if (ms <= 0) return "";
+  const totalMin = Math.floor(ms / 60000);
+  const d = Math.floor(totalMin / 1440);
+  const h = Math.floor((totalMin % 1440) / 60);
+  const m = totalMin % 60;
+  if (d >= 1) return `${d}d ${h}h`;
+  if (h >= 1) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+function usageBars(st: ProviderStatus): string {
+  const wins = [st.primary, st.secondary].filter(Boolean) as UsageWindow[];
+  if (!wins.length) return "";
+  return `<div class="ubars">${wins
+    .map((w) => {
+      const pct = Math.max(0, Math.min(100, w.usedPercent));
+      const reset = resetLabel(w.resetsAt);
+      return `<div class="ublock">
+        <div class="urow"><span class="ulabel">${windowLabel(w.windowMinutes)}</span><span class="ureset">${reset ? `${t("resetsIn")} ${reset}` : ""}</span></div>
+        <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+        <div class="upct">${fmtPct(w.usedPercent)} ${t("used")}</div>
+      </div>`;
+    })
+    .join("")}</div>`;
 }
 // Proveedores externos (Codex/Antigravity): muestran una tarjeta de cuenta.
 const EXTERNAL_CMD: Partial<Record<Provider, string>> = {
@@ -155,12 +194,14 @@ function providerCard(p: Provider, st: ProviderStatus): string {
       </div>`;
   }
   const url = PROVIDER_OPEN[p];
+  const bars = usageBars(st);
   return `<div class="pcard">
       <div class="pemblem" style="background:${PROVIDER_COLOR[p]}">${initial}</div>
       <div class="pplan">${esc(st.plan)}</div>
       ${st.email ? `<div class="pemail">${esc(st.email)}</div>` : ""}
+      ${bars}
       ${url ? `<button class="pcard-btn" data-act="open:${url}">${t("open")} ${esc(label)} ↗</button>` : ""}
-      <p class="pnote">${t("usageOnlyClaude")}</p>
+      ${bars ? "" : `<p class="pnote">${t("usageNotHere")}</p>`}
     </div>`;
 }
 

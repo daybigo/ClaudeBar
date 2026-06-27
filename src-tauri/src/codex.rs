@@ -4,15 +4,28 @@
 //! `https://api.openai.com/auth.chatgpt_plan_type` ("plus", "pro", ...).
 //! Decodificamos el payload del JWT (base64url) y leemos email + plan.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use walkdir::WalkDir;
+
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexWindow {
+    pub used_percent: f64,
+    /// Duración de la ventana en minutos (300=5h, 10080=semana, 43200=mes).
+    pub window_minutes: i64,
+    /// Epoch en segundos en que se reinicia la ventana.
+    pub resets_at: i64,
+}
 
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct CodexStatus {
     pub connected: bool,
     pub email: String,
     pub plan: String,
+    pub primary: Option<CodexWindow>,
+    pub secondary: Option<CodexWindow>,
 }
 
 fn auth_path() -> Option<PathBuf> {
@@ -47,11 +60,96 @@ pub fn read() -> CodexStatus {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    let (primary, secondary) = read_usage();
     CodexStatus {
         connected: true, // hay auth.json => sesion de Codex presente
         email,
         plan: label_plan(plan_type),
+        primary,
+        secondary,
     }
+}
+
+/// Lee el uso (rate limits) del rollout de sesion mas reciente. Codex escribe
+/// eventos con `rate_limits` (primary/secondary) en ~/.codex/sessions/**.
+fn read_usage() -> (Option<CodexWindow>, Option<CodexWindow>) {
+    let Some(home) = dirs::home_dir() else {
+        return (None, None);
+    };
+    let dir = home.join(".codex").join("sessions");
+    if !dir.is_dir() {
+        return (None, None);
+    }
+    // rollouts ordenados por fecha de modificacion (mas reciente primero)
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = WalkDir::new(&dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_type().is_file() && {
+                let n = e.file_name().to_string_lossy();
+                n.starts_with("rollout-") && n.ends_with(".jsonl")
+            }
+        })
+        .filter_map(|e| {
+            let m = e.metadata().ok()?.modified().ok()?;
+            Some((m, e.into_path()))
+        })
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+
+    for (_, path) in files.iter().take(6) {
+        if let Some(r) = last_rate_limits(path) {
+            return r;
+        }
+    }
+    (None, None)
+}
+
+/// Busca el ultimo evento con `rate_limits` en un rollout (filtra por substring
+/// para no parsear cada linea de archivos que pueden pesar decenas de MB).
+fn last_rate_limits(path: &Path) -> Option<(Option<CodexWindow>, Option<CodexWindow>)> {
+    let bytes = std::fs::read(path).ok()?;
+    let content = String::from_utf8_lossy(&bytes);
+    let mut found = None;
+    for line in content.lines() {
+        if !line.contains("rate_limits") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if let Some(rl) = find_key(&v, "rate_limits") {
+            let p = rl.get("primary").and_then(parse_window);
+            let s = rl.get("secondary").and_then(parse_window);
+            if p.is_some() || s.is_some() {
+                found = Some((p, s));
+            }
+        }
+    }
+    found
+}
+
+fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+    match v {
+        serde_json::Value::Object(m) => {
+            if let Some(x) = m.get(key) {
+                return Some(x);
+            }
+            m.values().find_map(|vv| find_key(vv, key))
+        }
+        serde_json::Value::Array(a) => a.iter().find_map(|vv| find_key(vv, key)),
+        _ => None,
+    }
+}
+
+fn parse_window(v: &serde_json::Value) -> Option<CodexWindow> {
+    let o = v.as_object()?;
+    let used = o.get("used_percent")?.as_f64()?;
+    Some(CodexWindow {
+        used_percent: used,
+        window_minutes: o.get("window_minutes").and_then(|x| x.as_i64()).unwrap_or(0),
+        resets_at: o.get("resets_at").and_then(|x| x.as_i64()).unwrap_or(0),
+    })
 }
 
 /// Decodifica el payload (claims) de un JWT sin verificar la firma.
