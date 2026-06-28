@@ -140,10 +140,22 @@ body {
   align-items: baseline;
   margin-bottom: 7px;
 }
+.ugroup {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--subtle);
+  margin: 4px 0 2px;
+}
 .ulabel {
   font-size: 15px;
   font-weight: 700;
   color: var(--text);
+}
+.ulabel.sub {
+  font-size: 13.5px;
+  font-weight: 600;
 }
 .ureset {
   font-size: 12px;

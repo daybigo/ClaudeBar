@@ -6,14 +6,27 @@
 //! la cadena "Google AI ..." dentro de los bytes decodificados.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Serialize;
+
+/// Una cubeta de cuota de Antigravity (p.ej. "Gemini Models" / "Weekly Limit").
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AntigravityBucket {
+    pub group: String,       // "Gemini Models" / "Claude and GPT models"
+    pub label: String,       // "Weekly Limit" / "Five Hour Limit"
+    pub window: String,      // "weekly" | "5h"
+    pub used_percent: f64,
+    pub resets_at: i64,      // epoch en segundos (0 si no se conoce)
+}
 
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct AntigravityStatus {
     pub connected: bool,
     pub email: String,
     pub plan: String,
+    pub buckets: Vec<AntigravityBucket>,
 }
 
 fn db_path() -> Option<PathBuf> {
@@ -60,7 +73,120 @@ pub fn read() -> AntigravityStatus {
         connected: true,
         email,
         plan,
+        buckets: read_quota().unwrap_or_default(),
     }
+}
+
+/// Lee el uso real desde el `language_server` local de la app de Antigravity
+/// (mismo origen que usa la propia IDE; solo funciona si la app esta abierta).
+fn read_quota() -> Option<Vec<AntigravityBucket>> {
+    let (csrf, ports) = find_language_server()?;
+    let client = reqwest::blocking::Client::builder()
+        .danger_accept_invalid_certs(true) // cert self-signed en 127.0.0.1
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?;
+    for port in ports {
+        let url = format!(
+            "https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
+        );
+        let resp = client
+            .post(&url)
+            .header("X-Codeium-Csrf-Token", &csrf)
+            .header("Connect-Protocol-Version", "1")
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .send();
+        if let Ok(r) = resp {
+            if r.status().is_success() {
+                if let Ok(v) = r.json::<serde_json::Value>() {
+                    let buckets = parse_quota(&v);
+                    if !buckets.is_empty() {
+                        return Some(buckets);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn parse_quota(v: &serde_json::Value) -> Vec<AntigravityBucket> {
+    let mut out = Vec::new();
+    let Some(groups) = v
+        .get("response")
+        .and_then(|r| r.get("groups"))
+        .and_then(|g| g.as_array())
+    else {
+        return out;
+    };
+    for g in groups {
+        let group = g
+            .get("displayName")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let Some(buckets) = g.get("buckets").and_then(|b| b.as_array()) else {
+            continue;
+        };
+        for b in buckets {
+            let remaining = b
+                .get("remainingFraction")
+                .and_then(|x| x.as_f64())
+                .unwrap_or(1.0);
+            let resets_at = b
+                .get("resetTime")
+                .and_then(|x| x.as_str())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|d| d.timestamp())
+                .unwrap_or(0);
+            out.push(AntigravityBucket {
+                group: group.clone(),
+                label: b.get("displayName").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                window: b.get("window").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                used_percent: ((1.0 - remaining) * 100.0).clamp(0.0, 100.0),
+                resets_at,
+            });
+        }
+    }
+    out
+}
+
+/// Localiza el proceso `language_server` de Antigravity y devuelve (csrf, puertos).
+/// Solo Windows por ahora; en otros SO devuelve None (sin barras de uso).
+#[cfg(windows)]
+fn find_language_server() -> Option<(String, Vec<u16>)> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let script = r#"$p = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'language_server.exe' -and $_.CommandLine -like '*antigravity*' } | Select-Object -First 1
+if ($p) {
+  $csrf = ([regex]'--csrf_token[ =]+([^ ]+)').Match($p.CommandLine).Groups[1].Value
+  $ports = (Get-NetTCPConnection -State Listen -OwningProcess $p.ProcessId -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort -Unique) -join ','
+  Write-Output "$csrf|$ports"
+}"#;
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    let (csrf, ports_str) = s.trim().split_once('|')?;
+    if csrf.is_empty() {
+        return None;
+    }
+    let ports: Vec<u16> = ports_str
+        .split(',')
+        .filter_map(|p| p.trim().parse::<u16>().ok())
+        .collect();
+    if ports.is_empty() {
+        return None;
+    }
+    Some((csrf.to_string(), ports))
+}
+
+#[cfg(not(windows))]
+fn find_language_server() -> Option<(String, Vec<u16>)> {
+    None
 }
 
 /// Decodificador base64 estandar (suficiente para este blob; ignora espacios).

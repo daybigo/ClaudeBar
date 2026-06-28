@@ -62,6 +62,7 @@ const I18N: Record<string, Dict> = {
     connected: "conectado", notConnected: "no conectado",
     open: "Abrir", loadingProvider: "Cargando…", monthly: "Mes",
     usageNotHere: "Sin datos de uso para este proveedor.",
+    openAntigravity: "Abre la app de Antigravity para ver tu uso.",
     connectHint: "Inicia sesión en {p} para conectarlo.",
     aboutTitle: "Acerca de Claude Bar", settingsTitle: "Ajustes", logoutTitle: "Cerrar sesión (Claude)",
   },
@@ -83,6 +84,7 @@ const I18N: Record<string, Dict> = {
     connected: "connected", notConnected: "not connected",
     open: "Open", loadingProvider: "Loading…", monthly: "Month",
     usageNotHere: "No usage data for this provider.",
+    openAntigravity: "Open the Antigravity app to see your usage.",
     connectHint: "Sign in to {p} to connect it.",
     aboutTitle: "About Claude Bar", settingsTitle: "Settings", logoutTitle: "Log out (Claude)",
   },
@@ -128,12 +130,53 @@ interface UsageWindow {
   windowMinutes: number;
   resetsAt: number; // epoch en segundos
 }
+interface AntigravityBucket {
+  group: string;
+  label: string;
+  window: string; // "5h" | "weekly"
+  usedPercent: number;
+  resetsAt: number;
+}
 interface ProviderStatus {
   connected: boolean;
   email: string;
   plan: string;
   primary?: UsageWindow | null;
   secondary?: UsageWindow | null;
+  buckets?: AntigravityBucket[];
+}
+function bucketLabel(b: AntigravityBucket): string {
+  if (b.window === "5h") return t("session");
+  if (b.window === "weekly") return t("weekly");
+  return b.label || b.window;
+}
+function antigravityBars(buckets: AntigravityBucket[]): string {
+  if (!buckets.length) return "";
+  const groups: { name: string; items: AntigravityBucket[] }[] = [];
+  for (const b of buckets) {
+    let g = groups.find((x) => x.name === b.group);
+    if (!g) {
+      g = { name: b.group, items: [] };
+      groups.push(g);
+    }
+    g.items.push(b);
+  }
+  return `<div class="ubars">${groups
+    .map(
+      (g) =>
+        `<div class="ugroup">${esc(g.name)}</div>${g.items
+          .map((b) => {
+            const pct = Math.max(0, Math.min(100, b.usedPercent));
+            const reset = resetLabel(b.resetsAt);
+            return `<div class="ublock">
+        <div class="urow"><span class="ulabel sub">${bucketLabel(b)}</span><span class="ureset">${reset ? `${t("resetsIn")} ${reset}` : ""}</span></div>
+        <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+        <div class="upct">${fmtPct(b.usedPercent)} ${t("used")}</div>
+      </div>`;
+          })
+          .join("")}`
+    )
+    .join("")}</div>`;
 }
 function windowLabel(mins: number): string {
   if (mins <= 360) return t("session");
@@ -194,14 +237,14 @@ function providerCard(p: Provider, st: ProviderStatus): string {
       </div>`;
   }
   const url = PROVIDER_OPEN[p];
-  const bars = usageBars(st);
+  const bars = st.buckets && st.buckets.length ? antigravityBars(st.buckets) : usageBars(st);
   return `<div class="pcard">
       <div class="pemblem" style="background:${PROVIDER_COLOR[p]}">${initial}</div>
       <div class="pplan">${esc(st.plan)}</div>
       ${st.email ? `<div class="pemail">${esc(st.email)}</div>` : ""}
       ${bars}
       ${url ? `<button class="pcard-btn" data-act="open:${url}">${t("open")} ${esc(label)} ↗</button>` : ""}
-      ${bars ? "" : `<p class="pnote">${t("usageNotHere")}</p>`}
+      ${bars ? "" : `<p class="pnote">${p === "antigravity" ? t("openAntigravity") : t("usageNotHere")}</p>`}
     </div>`;
 }
 
