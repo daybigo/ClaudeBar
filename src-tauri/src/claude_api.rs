@@ -9,7 +9,7 @@
 //! El endpoint limita agresivamente; el llamador debe espaciar los polls.
 
 use crate::credentials::{claude_dir, Credentials};
-use crate::model::{ExtraUsage, LimitWindow, UsageSnapshot};
+use crate::model::{ExtraUsage, LimitWindow, ScopedWindow, UsageSnapshot};
 use chrono::Utc;
 use serde_json::Value;
 use std::sync::OnceLock;
@@ -151,6 +151,55 @@ fn parse_extra_usage(v: &Value) -> ExtraUsage {
     }
 }
 
+/// Extrae las ventanas semanales por modelo del array `limits[]`. Cada entrada
+/// trae `scope.model.display_name` (ej "Fable"), `percent` y `resets_at`.
+/// Descartamos "All models" (esa es la ventana semanal general) y deduplicamos.
+fn parse_scoped_weekly(body: &Value) -> Vec<ScopedWindow> {
+    let mut out: Vec<ScopedWindow> = Vec::new();
+    let Some(limits) = body.get("limits").and_then(|x| x.as_array()) else {
+        return out;
+    };
+    for entry in limits {
+        let group = entry.get("group").and_then(|x| x.as_str()).unwrap_or("");
+        let kind = entry.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+        if group != "weekly" && !kind.contains("weekly") {
+            continue;
+        }
+        let model = entry.get("scope").and_then(|s| s.get("model"));
+        let display = model
+            .and_then(|m| m.get("display_name"))
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if display.is_empty() || display.eq_ignore_ascii_case("all models") {
+            continue;
+        }
+        if out.iter().any(|w| w.model.eq_ignore_ascii_case(&display)) {
+            continue;
+        }
+        let model_id = model
+            .and_then(|m| m.get("id"))
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let utilization = entry.get("percent").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        let resets_at = entry
+            .get("resets_at")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string());
+        let resets_in_label = resets_at.as_deref().map(resets_in_label).unwrap_or_default();
+        out.push(ScopedWindow {
+            model: display,
+            model_id,
+            utilization,
+            resets_at,
+            resets_in_label,
+        });
+    }
+    out
+}
+
 /// Hace la peticion HTTP y normaliza la respuesta.
 pub fn fetch(creds: &Credentials) -> FetchResult {
     let client = match reqwest::blocking::Client::builder()
@@ -195,6 +244,9 @@ pub fn fetch(creds: &Credentials) -> FetchResult {
     let seven_day = body.get("seven_day").and_then(parse_window).unwrap_or_default();
     let seven_day_sonnet = body.get("seven_day_sonnet").and_then(parse_window);
     let seven_day_opus = body.get("seven_day_opus").and_then(parse_window);
+    // Ventanas semanales por modelo: el endpoint las entrega en el array
+    // `limits[]` (aqui llega Fable, con scope.model.display_name).
+    let scoped_weekly = parse_scoped_weekly(&body);
     let extra_usage = body
         .get("extra_usage")
         .map(parse_extra_usage)
@@ -207,6 +259,7 @@ pub fn fetch(creds: &Credentials) -> FetchResult {
         seven_day,
         seven_day_sonnet,
         seven_day_opus,
+        scoped_weekly,
         extra_usage,
         stale: false,
         error: None,

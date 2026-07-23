@@ -10,7 +10,7 @@
 //! para que el numero se parezca al de los dashboards oficiales.
 
 use crate::credentials::claude_dir;
-use crate::model::CostReport;
+use crate::model::{CostReport, ModelUsage};
 use crate::pricing;
 use chrono::{DateTime, Datelike, Duration, Local, Utc};
 use serde_json::Value;
@@ -168,8 +168,12 @@ pub fn compute() -> CostReport {
     let mut report = CostReport {
         updated_at: now.to_rfc3339(),
         empty: records.is_empty(),
+        daily: vec![0.0; 30],
         ..Default::default()
     };
+    // Desglose por modelo dentro de la ventana de 30 dias (costo + tokens).
+    let mut model_cost: HashMap<String, f64> = HashMap::new();
+    let mut model_tokens: HashMap<String, u64> = HashMap::new();
 
     for rec in records.values() {
         let local = rec.ts.with_timezone(&Local);
@@ -193,7 +197,30 @@ pub fn compute() -> CostReport {
             report.last30_usd += cost;
             report.last30_tokens += tokens;
         }
+
+        // Histograma diario (ultimos 30 dias) y desglose por modelo (30 dias).
+        let days_ago = (today - date).num_days();
+        if (0..30).contains(&days_ago) {
+            report.daily[(29 - days_ago) as usize] += cost;
+        }
+        if local >= last30_cutoff {
+            *model_cost.entry(rec.model.clone()).or_insert(0.0) += cost;
+            *model_tokens.entry(rec.model.clone()).or_insert(0) += tokens;
+        }
     }
+
+    // Desglose por modelo ordenado de mayor a menor costo.
+    let mut models: Vec<ModelUsage> = model_cost
+        .into_iter()
+        .map(|(model, cost_usd)| ModelUsage {
+            tokens: model_tokens.get(&model).copied().unwrap_or(0),
+            model,
+            cost_usd,
+        })
+        .collect();
+    models.sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal));
+    report.top_model = models.first().map(|m| m.model.clone()).unwrap_or_default();
+    report.models = models;
 
     report
 }

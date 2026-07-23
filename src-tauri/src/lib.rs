@@ -75,7 +75,9 @@ fn get_codex() -> codex::CodexStatus {
 #[tauri::command]
 fn set_provider(app: AppHandle, provider: String) {
     *app.state::<AppState>().provider.lock().unwrap() = provider;
-    refresh_tray_for_provider(&app);
+    // En hilo: leer el uso de Codex/Antigravity puede tardar (logs / language_server).
+    let a = app.clone();
+    std::thread::spawn(move || refresh_tray_for_provider(&a));
 }
 
 #[tauri::command]
@@ -164,15 +166,20 @@ fn show_window(app: &AppHandle, anchor: Option<(f64, f64)>) {
             position_window(&win, x, y);
         }
         let _ = win.show();
+        let _ = win.unminimize();
         let _ = win.set_focus();
     }
 }
 
-/// Clic en la bandeja: alterna mostrar/ocultar. (Ya NO se auto-oculta al
-/// perder foco, asi que la ventana se queda fija y se puede mover libremente.)
+/// Clic en la bandeja: si la ventana esta visible Y al frente, la oculta; si
+/// esta oculta o detras de otra ventana, la muestra y la trae al frente. (Antes
+/// solo miraba "visible", asi que un clic con la ventana detras la ocultaba en
+/// vez de traerla, dando la sensacion de que "no abre".)
 fn on_tray_left_click(app: &AppHandle, x: f64, y: f64) {
     if let Some(win) = app.get_webview_window("main") {
-        if win.is_visible().unwrap_or(false) {
+        let visible = win.is_visible().unwrap_or(false);
+        let focused = win.is_focused().unwrap_or(false);
+        if visible && focused {
             let _ = win.hide();
         } else {
             show_window(app, Some((x, y)));
@@ -215,30 +222,91 @@ fn provider_is_claude(app: &AppHandle) -> bool {
     app.state::<AppState>().provider.lock().unwrap().as_str() == "claude"
 }
 
-/// Repinta el icono de bandeja segun el proveedor seleccionado. Claude muestra
-/// el % de sesion; Codex/Antigravity muestran su inicial (no exponen % local).
+fn max_pct(vals: impl Iterator<Item = f64>) -> Option<f64> {
+    vals.fold(None, |acc, v| Some(acc.map_or(v, |a: f64| a.max(v))))
+}
+
+fn win_short(mins: i64) -> &'static str {
+    if mins <= 360 {
+        "5h"
+    } else if mins <= 11000 {
+        "Sem"
+    } else {
+        "Mes"
+    }
+}
+
+fn codex_tip(st: &codex::CodexStatus) -> String {
+    let parts: Vec<String> = [st.primary.as_ref(), st.secondary.as_ref()]
+        .into_iter()
+        .flatten()
+        .map(|w| format!("{} {:.0}%", win_short(w.window_minutes), w.used_percent))
+        .collect();
+    if parts.is_empty() {
+        format!("Codex — {}", st.plan)
+    } else {
+        format!("Codex {} — {}", st.plan, parts.join(" · "))
+    }
+}
+
+fn antigravity_tip(st: &antigravity::AntigravityStatus) -> String {
+    let parts: Vec<String> = st
+        .buckets
+        .iter()
+        .map(|b| {
+            let w = if b.window == "5h" { "5h" } else { "Sem" };
+            let g = if b.group.starts_with("Gemini") { "Gem" } else { "C/GPT" };
+            format!("{g} {w} {:.0}%", b.used_percent)
+        })
+        .collect();
+    if parts.is_empty() {
+        format!("Antigravity — {}", st.plan)
+    } else {
+        format!("Antigravity {} — {}", st.plan, parts.join(" · "))
+    }
+}
+
+/// Repinta el icono de bandeja segun el proveedor seleccionado. Todos muestran
+/// el % de uso (como Claude); si un proveedor no expone uso, cae a su inicial.
 fn refresh_tray_for_provider(app: &AppHandle) {
     let provider = app.state::<AppState>().provider.lock().unwrap().clone();
     match provider.as_str() {
         "codex" => {
             let st = codex::read();
-            let bg = if st.connected { [16, 163, 127] } else { [120, 120, 130] };
-            let tip = if st.connected {
-                format!("Codex — {}", st.plan)
-            } else {
-                "Codex — no conectado".to_string()
-            };
-            update_tray_label(app, "C", bg, &tip);
+            let pct = max_pct(
+                [st.primary.as_ref(), st.secondary.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .map(|w| w.used_percent),
+            );
+            match (st.connected, pct) {
+                (true, Some(p)) => update_tray(app, Some(p), &codex_tip(&st)),
+                (conn, _) => {
+                    let bg = if conn { [16, 163, 127] } else { [120, 120, 130] };
+                    let tip = if conn {
+                        format!("Codex — {}", st.plan)
+                    } else {
+                        "Codex — no conectado".to_string()
+                    };
+                    update_tray_label(app, "C", bg, &tip);
+                }
+            }
         }
         "antigravity" => {
             let st = antigravity::read();
-            let bg = if st.connected { [66, 133, 244] } else { [120, 120, 130] };
-            let tip = if st.connected {
-                format!("Antigravity — {}", st.plan)
-            } else {
-                "Antigravity — no conectado".to_string()
-            };
-            update_tray_label(app, "A", bg, &tip);
+            let pct = max_pct(st.buckets.iter().map(|b| b.used_percent));
+            match (st.connected, pct) {
+                (true, Some(p)) => update_tray(app, Some(p), &antigravity_tip(&st)),
+                (conn, _) => {
+                    let bg = if conn { [66, 133, 244] } else { [120, 120, 130] };
+                    let tip = if conn {
+                        format!("Antigravity — {} (abre la app para el uso)", st.plan)
+                    } else {
+                        "Antigravity — no conectado".to_string()
+                    };
+                    update_tray_label(app, "A", bg, &tip);
+                }
+            }
         }
         _ => {
             let snap = app.state::<AppState>().usage.lock().unwrap().clone();
