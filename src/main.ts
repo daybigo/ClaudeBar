@@ -14,6 +14,13 @@ interface LimitWindow {
   resetsAt: string | null;
   resetsInLabel: string;
 }
+interface ScopedWindow {
+  model: string;
+  modelId: string;
+  utilization: number;
+  resetsAt: string | null;
+  resetsInLabel: string;
+}
 interface ExtraUsage {
   usedUsd: number;
   limitUsd: number;
@@ -25,18 +32,30 @@ interface UsageSnapshot {
   fiveHour: LimitWindow;
   sevenDay: LimitWindow;
   sevenDaySonnet: LimitWindow | null;
+  sevenDayOpus: LimitWindow | null;
+  scopedWeekly: ScopedWindow[];
   extraUsage: ExtraUsage;
   stale: boolean;
   error: string | null;
   updatedAt: string;
 }
+interface ModelUsage {
+  model: string;
+  costUsd: number;
+  tokens: number;
+}
 interface CostReport {
   todayUsd: number;
   todayTokens: number;
   weekUsd: number;
+  weekTokens: number;
   monthUsd: number;
+  monthTokens: number;
   last30Usd: number;
   last30Tokens: number;
+  daily: number[];
+  topModel: string;
+  models: ModelUsage[];
   updatedAt: string;
   empty: boolean;
 }
@@ -52,6 +71,8 @@ const I18N: Record<string, Dict> = {
     behind: "Por debajo del ritmo", ahead: "Por encima del ritmo", onpace: "En ritmo",
     today: "Hoy", week: "Semana", last30: "Últimos 30 días", tokens: "tokens",
     costNote: "≈ valor equivalente en API · tu plan lo cubre",
+    gToday: "Hoy", g30: "30 días", gMonthTok: "Tokens (mes)", gWeekTok: "Tokens (sem)", topModel: "Modelo top",
+    byModel: "Uso por modelo (30 días)",
     thisMonth: "Este mes", updatedJust: "actualizado recién", ago: "hace",
     connect: "Conecta Claude Code para ver tu uso", langBtn: "English",
     errExpired: "Sesión expirada — abre Claude Code para renovar",
@@ -74,6 +95,8 @@ const I18N: Record<string, Dict> = {
     behind: "Behind pace", ahead: "Ahead of pace", onpace: "On pace",
     today: "Today", week: "Week", last30: "Last 30 days", tokens: "tokens",
     costNote: "≈ API-equivalent value · covered by your plan",
+    gToday: "Today", g30: "30 days", gMonthTok: "Tokens (month)", gWeekTok: "Tokens (week)", topModel: "Top model",
+    byModel: "By model (30 days)",
     thisMonth: "This month", updatedJust: "updated just now", ago: "ago",
     connect: "Connect Claude Code to see your usage", langBtn: "Español",
     errExpired: "Session expired — open Claude Code to renew",
@@ -89,7 +112,19 @@ const I18N: Record<string, Dict> = {
     aboutTitle: "About Claude Bar", settingsTitle: "Settings", logoutTitle: "Log out (Claude)",
   },
 };
-let lang = localStorage.getItem("lang") === "en" ? "en" : "es";
+// Primer arranque: sin preferencia guardada, seguimos el idioma del SO.
+// WebView2 expone el locale del sistema en navigator.language(s), así que si
+// el Windows del usuario está en español arranca en ES; si no, en EN.
+function initialLang(): "es" | "en" {
+  const saved = localStorage.getItem("lang");
+  if (saved === "es" || saved === "en") return saved;
+  const tags =
+    navigator.languages && navigator.languages.length
+      ? navigator.languages
+      : [navigator.language || ""];
+  return tags.some((l) => l.toLowerCase().startsWith("es")) ? "es" : "en";
+}
+let lang: "es" | "en" = initialLang();
 const t = (k: string) => I18N[lang][k] ?? k;
 function errText(code: string): string {
   const m: Record<string, string> = {
@@ -150,34 +185,6 @@ function bucketLabel(b: AntigravityBucket): string {
   if (b.window === "weekly") return t("weekly");
   return b.label || b.window;
 }
-function antigravityBars(buckets: AntigravityBucket[]): string {
-  if (!buckets.length) return "";
-  const groups: { name: string; items: AntigravityBucket[] }[] = [];
-  for (const b of buckets) {
-    let g = groups.find((x) => x.name === b.group);
-    if (!g) {
-      g = { name: b.group, items: [] };
-      groups.push(g);
-    }
-    g.items.push(b);
-  }
-  return `<div class="ubars">${groups
-    .map(
-      (g) =>
-        `<div class="ugroup">${esc(g.name)}</div>${g.items
-          .map((b) => {
-            const pct = Math.max(0, Math.min(100, b.usedPercent));
-            const reset = resetLabel(b.resetsAt);
-            return `<div class="ublock">
-        <div class="urow"><span class="ulabel sub">${bucketLabel(b)}</span><span class="ureset">${reset ? `${t("resetsIn")} ${reset}` : ""}</span></div>
-        <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
-        <div class="upct">${fmtPct(b.usedPercent)} ${t("used")}</div>
-      </div>`;
-          })
-          .join("")}`
-    )
-    .join("")}</div>`;
-}
 function windowLabel(mins: number): string {
   if (mins <= 360) return t("session");
   if (mins <= 11000) return t("weekly");
@@ -195,20 +202,60 @@ function resetLabel(epochSec: number): string {
   if (h >= 1) return `${h}h ${m}m`;
   return `${m}m`;
 }
+// Bloque de uso con el MISMO estilo que Claude: etiqueta, barra, y abajo
+// "% usado" a la izquierda + "Reinicia en" a la derecha.
+function usageBlock(label: string, pct: number, resetEpoch: number, pace = ""): string {
+  const p = Math.max(0, Math.min(100, pct));
+  const reset = resetLabel(resetEpoch);
+  return `<section class="block">
+      <h2>${esc(label)}</h2>
+      <div class="bar"><div class="fill" style="width:${p}%"></div></div>
+      <div class="bar-foot"><span class="muted">${fmtPct(pct)} ${t("used")}</span><span class="muted right">${
+        reset ? `${t("resetsIn")} ${reset}` : ""
+      }</span></div>
+      ${pace ? `<div class="pace">${pace}</div>` : ""}
+    </section>`;
+}
+// Ritmo de una ventana externa: compara lo usado con lo esperado segun el
+// tiempo transcurrido de la ventana. Solo tiene sentido en ventanas largas.
+function windowPace(w: UsageWindow): string {
+  if (!w.windowMinutes || !w.resetsAt) return "";
+  const totalMs = w.windowMinutes * 60000;
+  const remainMs = w.resetsAt * 1000 - Date.now();
+  if (remainMs <= 0 || remainMs > totalMs) return "";
+  const expected = ((totalMs - remainMs) / totalMs) * 100;
+  const delta = w.usedPercent - expected;
+  const label = delta < -2 ? t("behind") : delta > 2 ? t("ahead") : t("onpace");
+  const sign = delta > 0 ? "+" : "";
+  return `${t("pace")}: ${label} (${sign}${delta.toFixed(0)}%)`;
+}
 function usageBars(st: ProviderStatus): string {
   const wins = [st.primary, st.secondary].filter(Boolean) as UsageWindow[];
-  if (!wins.length) return "";
-  return `<div class="ubars">${wins
+  return wins
     .map((w) => {
-      const pct = Math.max(0, Math.min(100, w.usedPercent));
-      const reset = resetLabel(w.resetsAt);
-      return `<div class="ublock">
-        <div class="urow"><span class="ulabel">${windowLabel(w.windowMinutes)}</span><span class="ureset">${reset ? `${t("resetsIn")} ${reset}` : ""}</span></div>
-        <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
-        <div class="upct">${fmtPct(w.usedPercent)} ${t("used")}</div>
-      </div>`;
+      const pace = w.windowMinutes > 360 ? windowPace(w) : ""; // solo ventanas > 6h
+      return usageBlock(windowLabel(w.windowMinutes), w.usedPercent, w.resetsAt, pace);
     })
-    .join("")}</div>`;
+    .join("");
+}
+function antigravityBars(buckets: AntigravityBucket[]): string {
+  if (!buckets.length) return "";
+  const groups: { name: string; items: AntigravityBucket[] }[] = [];
+  for (const b of buckets) {
+    let g = groups.find((x) => x.name === b.group);
+    if (!g) {
+      g = { name: b.group, items: [] };
+      groups.push(g);
+    }
+    g.items.push(b);
+  }
+  return groups
+    .map(
+      (g) =>
+        `<div class="pgroup">${esc(g.name)}</div>` +
+        g.items.map((b) => usageBlock(bucketLabel(b), b.usedPercent, b.resetsAt)).join("")
+    )
+    .join("");
 }
 // Proveedores externos (Codex/Antigravity): muestran una tarjeta de cuenta.
 const EXTERNAL_CMD: Partial<Record<Provider, string>> = {
@@ -238,14 +285,25 @@ function providerCard(p: Provider, st: ProviderStatus): string {
   }
   const url = PROVIDER_OPEN[p];
   const bars = st.buckets && st.buckets.length ? antigravityBars(st.buckets) : usageBars(st);
-  return `<div class="pcard">
-      <div class="pemblem" style="background:${PROVIDER_COLOR[p]}">${initial}</div>
-      <div class="pplan">${esc(st.plan)}</div>
-      ${st.email ? `<div class="pemail">${esc(st.email)}</div>` : ""}
-      ${bars}
-      ${url ? `<button class="pcard-btn" data-act="open:${url}">${t("open")} ${esc(label)} ↗</button>` : ""}
-      ${bars ? "" : `<p class="pnote">${p === "antigravity" ? t("openAntigravity") : t("usageNotHere")}</p>`}
+  // Cabecera de cuenta del dashboard: emblema + plan + email.
+  const head = `<div class="pdash-head">
+      <div class="pemblem sm" style="background:${PROVIDER_COLOR[p]}">${initial}</div>
+      <div class="pdash-id">
+        <div class="pdash-plan">${esc(st.plan || label)}</div>
+        ${st.email ? `<div class="pdash-email">${esc(st.email)}</div>` : ""}
+      </div>
     </div>`;
+  const openBtn = url
+    ? `<button class="pcard-btn wide" data-act="open:${url}">${t("open")} ${esc(label)} ↗</button>`
+    : "";
+  if (bars) {
+    // Dashboard completo: cuenta + medidores (mismo estilo que Claude) + abrir.
+    return `<div class="pdash">${head}<hr class="rule" />${bars}${openBtn}</div>`;
+  }
+  // Conectado pero sin medidores (p.ej. app de Antigravity cerrada).
+  return `<div class="pdash">${head}
+      <p class="pnote">${p === "antigravity" ? t("openAntigravity") : t("usageNotHere")}</p>
+      ${openBtn}</div>`;
 }
 
 async function refreshExternal(p: Provider, command: string): Promise<void> {
@@ -255,11 +313,21 @@ async function refreshExternal(p: Provider, command: string): Promise<void> {
   } catch (e) {
     console.error(command, e);
   }
+  const usageVals: number[] = [];
+  if (st.primary) usageVals.push(st.primary.usedPercent);
+  if (st.secondary) usageVals.push(st.secondary.usedPercent);
+  for (const b of st.buckets || []) usageVals.push(b.usedPercent);
+  setMeter(p, usageVals.length ? Math.max(...usageVals) : 0);
+
   if (loadProvider() !== p) return; // el usuario cambió mientras tanto
   $("plan-badge").textContent = st.connected ? st.plan : "";
   const updated = $("updated");
   updated.classList.remove("stale");
-  updated.textContent = st.connected ? t("connected") : t("notConnected");
+  updated.textContent = st.connected
+    ? st.email
+      ? `${t("connected")} · ${st.email}`
+      : t("connected")
+    : t("notConnected");
   $("soon").innerHTML = providerCard(p, st);
 }
 
@@ -334,9 +402,45 @@ function weeklyPace(win: LimitWindow): string {
 }
 
 // ----- Pintado -----
+function setMeter(p: Provider, pct: number) {
+  const el = document.getElementById(`meter-${p}`);
+  if (el) el.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+}
+
+// Barras de ventana semanal por modelo (Fable, Opus, Sonnet...). Prefiere el
+// array scopedWeekly del endpoint (limits[]); si viene vacio, cae a las
+// ventanas planas legacy seven_day_sonnet/opus.
+function renderModelWindows(u: UsageSnapshot): string {
+  const wins: { label: string; util: number; reset: string }[] = [];
+  if (u.scopedWeekly && u.scopedWeekly.length) {
+    for (const w of u.scopedWeekly) {
+      wins.push({ label: w.model, util: w.utilization, reset: w.resetsInLabel });
+    }
+  } else {
+    if (u.sevenDaySonnet) {
+      wins.push({ label: "Sonnet", util: u.sevenDaySonnet.utilization, reset: u.sevenDaySonnet.resetsInLabel });
+    }
+    if (u.sevenDayOpus) {
+      wins.push({ label: "Opus", util: u.sevenDayOpus.utilization, reset: u.sevenDayOpus.resetsInLabel });
+    }
+  }
+  return wins
+    .map((w) => {
+      const p = Math.max(0, Math.min(100, w.util));
+      return (
+        `<section class="block"><h2>${esc(w.label)}</h2>` +
+        `<div class="bar"><div class="fill" style="width:${p}%"></div></div>` +
+        `<div class="bar-foot"><span class="muted">${fmtPct(w.util)} ${t("used")}</span>` +
+        `<span class="muted right">${w.reset ? `${t("resetsIn")} ${w.reset}` : ""}</span></div></section>`
+      );
+    })
+    .join("");
+}
+
 function applyUsage(u: UsageSnapshot) {
   lastUsage = u;
   lastPlan = u.connected ? u.plan : "";
+  setMeter("claude", u.connected ? u.fiveHour.utilization : 0);
   // Cacheamos siempre, pero solo pintamos si Claude es el proveedor activo.
   if (loadProvider() !== "claude") return;
   $("plan-badge").textContent = lastPlan;
@@ -373,28 +477,68 @@ function applyUsage(u: UsageSnapshot) {
   setBar("cv-weekly-fill", u.sevenDay.utilization);
   $("cv-weekly-pct").textContent = fmtPct(u.sevenDay.utilization);
 
-  // Sonnet
-  const sonnet = u.sevenDaySonnet;
-  if (sonnet) {
-    setBar("sonnet-fill", sonnet.utilization);
-    $("sonnet-pct").textContent = `${fmtPct(sonnet.utilization)} ${t("used")}`;
-    $("sonnet-block").style.display = "";
-  } else {
-    $("sonnet-block").style.display = "none";
-  }
+  // Ventanas semanales por modelo (Sonnet / Opus / Fable...): dinamicas.
+  $("model-windows").innerHTML = renderModelWindows(u);
 
-  // Uso extra
+  // Uso extra (se oculta si nunca se usó nada)
   const ex = u.extraUsage;
+  const extraUsed = ex.usedUsd > 0 || ex.utilization > 0;
+  $("extra-block").style.display = extraUsed ? "" : "none";
+  $("extra-hr").style.display = extraUsed ? "" : "none";
   setBar("extra-fill", ex.utilization);
   $("extra-amount").textContent = `${t("thisMonth")}: ${fmtUsd(ex.usedUsd)} / ${fmtUsd(ex.limitUsd)}`;
   $("extra-pct").textContent = `${fmtPct(ex.utilization)} ${t("used")}`;
 }
 
+function renderChart(daily: number[]) {
+  const el = $("cost-chart");
+  if (!daily.length) {
+    el.innerHTML = "";
+    return;
+  }
+  const max = Math.max(0.0001, ...daily);
+  el.innerHTML = daily
+    .map((v) => {
+      const h = v > 0 ? Math.max(6, Math.round((v / max) * 100)) : 0;
+      return `<div class="chart-bar" style="height:${h}%" title="$ ${v.toFixed(2)}"></div>`;
+    })
+    .join("");
+}
+// Nombre bonito del modelo: "claude-fable-5" -> "Fable 5", "claude-opus-4-8" -> "Opus 4.8".
+function prettyModel(id: string): string {
+  const m = id.toLowerCase();
+  const fam = ["opus", "sonnet", "haiku", "fable"].find((f) => m.includes(f));
+  if (!fam) return id;
+  const nums = (m.split(fam)[1] || "").match(/\d+/g)?.filter((n) => n.length <= 2) ?? [];
+  const label = fam.charAt(0).toUpperCase() + fam.slice(1);
+  return nums.length ? `${label} ${nums.join(".")}` : label;
+}
+// Desglose de costo/tokens por modelo (30 dias). Muestra Fable, Opus, etc.
+function renderModels(models: ModelUsage[]): string {
+  const rows = (models || []).filter((m) => m.costUsd > 0 || m.tokens > 0).slice(0, 5);
+  if (!rows.length) return "";
+  return (
+    `<div class="mb-head">${t("byModel")}</div>` +
+    rows
+      .map(
+        (m) =>
+          `<div class="mb-row"><span class="mb-name">${esc(prettyModel(m.model))}</span>` +
+          `<span class="mb-tok">${fmtTokens(m.tokens)}</span>` +
+          `<span class="mb-cost">${fmtUsd(m.costUsd)}</span></div>`
+      )
+      .join("")
+  );
+}
 function applyCost(c: CostReport) {
   lastCost = c;
-  $("cost-today").textContent = `${t("today")}: ${fmtUsd(c.todayUsd)} · ${fmtTokens(c.todayTokens)} ${t("tokens")}`;
-  $("cost-week").textContent = `${t("week")}: ${fmtUsd(c.weekUsd)}`;
-  $("cost-30").textContent = `${t("last30")}: ${fmtUsd(c.last30Usd)} · ${fmtTokens(c.last30Tokens)} ${t("tokens")}`;
+  renderChart(c.daily || []);
+  $("model-breakdown").innerHTML = renderModels(c.models);
+  // El desglose ya encabeza con el modelo top; dejamos la linea suelta vacia.
+  $("top-model").textContent = "";
+  $("cg-today").textContent = fmtUsd(c.todayUsd);
+  $("cg-30").textContent = fmtUsd(c.last30Usd);
+  $("cg-month-tok").textContent = fmtTokens(c.monthTokens);
+  $("cg-week-tok").textContent = fmtTokens(c.weekTokens);
   $("cost-note").textContent = t("costNote");
 }
 
@@ -557,6 +701,25 @@ async function main() {
   document.addEventListener("click", (e) => {
     const el = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
     if (el) handleAction(el.dataset.act || "");
+  });
+
+  // Arrastrar la ventana desde TODO el header, incluso sobre pestañas/botones:
+  // un clic (sin mover) activa el botón; si arrastras, mueve la ventana.
+  let dragOrigin: { x: number; y: number } | null = null;
+  document.querySelector<HTMLElement>(".titlebar")?.addEventListener("mousedown", (e) => {
+    if (e.button === 0) dragOrigin = { x: e.clientX, y: e.clientY };
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!dragOrigin) return;
+    const dx = e.clientX - dragOrigin.x;
+    const dy = e.clientY - dragOrigin.y;
+    if (dx * dx + dy * dy > 16) {
+      dragOrigin = null;
+      void appWindow.startDragging();
+    }
+  });
+  document.addEventListener("mouseup", () => {
+    dragOrigin = null;
   });
 
   // Sincroniza la bandeja con el proveedor persistido al arrancar.

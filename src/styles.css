@@ -9,11 +9,14 @@
   --text: #f3f4f8;
   --muted: rgba(255, 255, 255, 0.78);
   --subtle: rgba(255, 255, 255, 0.55);
+  /* texto sobre superficies claras/opacas (chips, badges, modales) */
+  --ink: #f3f4f8;
+  --ink-soft: rgba(255, 255, 255, 0.6);
   --rule: rgba(255, 255, 255, 0.14);
   --track: rgba(255, 255, 255, 0.18);
   --hover: rgba(255, 255, 255, 0.1);
-  --panel-bg: rgba(24, 26, 38, 0.3);
-  --panel-border: rgba(255, 255, 255, 0.12);
+  --panel-bg: rgba(28, 28, 30, 0);
+  --panel-border: rgba(255, 255, 255, 0.06);
   --panel-inset: rgba(255, 255, 255, 0.1);
   --chip-bg: rgba(255, 255, 255, 0.14);
   --chip-bg-hover: rgba(255, 255, 255, 0.26);
@@ -24,14 +27,19 @@
   --modal-chip-hover: rgba(255, 255, 255, 0.26);
 }
 
-/* === Tema CLARO === */
+/* === Tema CLARO ===
+   El texto del panel va en BLANCO (el panel es translúcido y normalmente se ve
+   sobre un fondo oscuro). Las superficies claras (chips/badges/modales) usan
+   --ink oscuro para que su texto siga siendo legible. */
 :root[data-theme="light"] {
-  --text: #2b2e3a;
-  --muted: #595c69;
-  --subtle: #7b7e8b;
-  --rule: rgba(60, 65, 100, 0.14);
-  --track: rgba(60, 65, 100, 0.16);
-  --hover: rgba(70, 80, 130, 0.1);
+  --text: #f5f6fa;
+  --muted: rgba(255, 255, 255, 0.8);
+  --subtle: rgba(255, 255, 255, 0.58);
+  --ink: #2b2e3a;
+  --ink-soft: rgba(43, 46, 58, 0.62);
+  --rule: rgba(255, 255, 255, 0.16);
+  --track: rgba(255, 255, 255, 0.2);
+  --hover: rgba(255, 255, 255, 0.12);
   --panel-bg: rgba(248, 250, 255, 0.3);
   --panel-border: rgba(255, 255, 255, 0.7);
   --panel-inset: rgba(255, 255, 255, 0.85);
@@ -110,7 +118,7 @@ body {
   border: 1px solid var(--chip-border);
   border-radius: 9px;
   background: var(--chip-bg);
-  color: var(--text);
+  color: var(--ink);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -125,46 +133,65 @@ body {
   max-width: 240px;
   line-height: 1.5;
 }
-/* Barras de uso del proveedor (Codex) */
-.ubars {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin: 8px 0 4px;
-  text-align: left;
+/* Secciones de uso del proveedor (Codex/Antigravity) — mismo estilo que Claude */
+.psections {
+  padding: 2px 0 6px;
 }
-.urow {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 7px;
+.psections .block {
+  margin-bottom: 4px;
 }
-.ugroup {
+.pgroup {
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--subtle);
-  margin: 4px 0 2px;
+  margin: 14px 0 6px;
 }
-.ulabel {
-  font-size: 15px;
+.pgroup:first-child {
+  margin-top: 2px;
+}
+.pcard-btn.wide {
+  width: 100%;
+  margin-top: 14px;
+}
+/* Dashboard de proveedor (Codex / Antigravity): cabecera de cuenta + medidores */
+.pdash {
+  padding: 2px 0 6px;
+}
+.pdash .block {
+  margin-bottom: 4px;
+}
+.pdash-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0 8px;
+}
+.pemblem.sm {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 20px;
+}
+.pdash-id {
+  min-width: 0;
+}
+.pdash-plan {
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
 }
-.ulabel.sub {
-  font-size: 13.5px;
-  font-weight: 600;
-}
-.ureset {
-  font-size: 12px;
-  color: var(--subtle);
-}
-.upct {
-  font-size: 13px;
+.pdash-email {
+  font-size: 12.5px;
   color: var(--muted);
-  margin-top: 7px;
+  margin-top: -1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdash .pnote {
+  margin-top: 10px;
 }
 
 .panel {
@@ -174,12 +201,12 @@ body {
   display: flex;
   flex-direction: column;
   border-radius: 14px;
-  /* glassmorphism: el color depende del tema (variables); blur de 7px */
+  /* fondo transparente con un difuminado sutil. */
   background: var(--panel-bg);
-  backdrop-filter: blur(7px);
-  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
   border: 1px solid var(--panel-border);
-  box-shadow: inset 0 1px 0 var(--panel-inset);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 var(--panel-inset);
   overflow-y: auto;
 }
 .panel::-webkit-scrollbar {
@@ -200,7 +227,7 @@ body {
   display: flex;
   align-items: center;
 }
-/* Pestanas de proveedor (estilo CodexBar) */
+/* Pestanas de proveedor: icono + nombre, compactas en la barra de titulo */
 .tabs {
   display: inline-flex;
   gap: 2px;
@@ -209,22 +236,33 @@ body {
   background: var(--chip-bg);
 }
 .tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   border: none;
   background: none;
-  color: var(--subtle);
+  color: var(--ink-soft);
   font-size: 11.5px;
   font-weight: 600;
-  padding: 3px 9px;
+  padding: 3px 8px;
   border-radius: 7px;
   cursor: pointer;
   white-space: nowrap;
 }
 .tab:hover {
-  color: var(--text);
+  color: var(--ink);
 }
 .tab.active {
   background: var(--blue);
   color: #fff;
+}
+.tab-ic {
+  display: flex;
+}
+.tab-ic svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 .tb-buttons {
   display: flex;
@@ -236,7 +274,7 @@ body {
   border: 1px solid var(--chip-border);
   border-radius: 7px;
   background: var(--chip-bg);
-  color: var(--text);
+  color: var(--ink);
   font-size: 16px;
   font-weight: 700;
   line-height: 1;
@@ -265,7 +303,7 @@ body {
 }
 .plan {
   font-size: 12.5px;
-  color: var(--text);
+  color: var(--ink);
   font-weight: 600;
   background: var(--chip-bg);
   border: 1px solid var(--chip-border);
@@ -339,12 +377,77 @@ body {
   color: var(--subtle);
   font-size: 12px;
 }
+/* Histograma de costo diario (ultimos 30 dias) */
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 46px;
+  margin: 10px 0 8px;
+}
+.chart-bar {
+  flex: 1;
+  background: var(--orange);
+  border-radius: 2px 2px 0 0;
+  opacity: 0.85;
+}
+/* Grid 2x2 de metricas de costo */
+.cost-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-top: 10px;
+}
+.cg-label {
+  font-size: 11px;
+  color: var(--subtle);
+}
+.cg-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 1px;
+}
+/* Desglose de uso por modelo (Fable, Opus, Sonnet, Haiku...) */
+.model-breakdown {
+  margin-top: 12px;
+}
+.mb-head {
+  font-size: 11px;
+  color: var(--subtle);
+  margin-bottom: 5px;
+}
+.mb-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 3px 0;
+}
+.mb-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.mb-tok {
+  font-size: 11.5px;
+  color: var(--subtle);
+  font-variant-numeric: tabular-nums;
+}
+.mb-cost {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-width: 60px;
+  text-align: right;
+}
 
 /* ---------- Acciones ---------- */
 .actions {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
 }
 .action {
   background: none;
@@ -352,7 +455,7 @@ body {
   text-align: left;
   font-size: 14px;
   color: var(--text);
-  padding: 6px 8px;
+  padding: 3px 8px;
   border-radius: 8px;
   cursor: pointer;
   display: flex;
@@ -437,7 +540,7 @@ body.compact #compact-view {
   border: 1px solid var(--chip-border);
   border-radius: 6px;
   background: var(--chip-bg);
-  color: var(--text);
+  color: var(--ink);
   cursor: pointer;
   font-size: 12px;
   display: flex;
@@ -481,18 +584,18 @@ body.compact #compact-view {
   font-size: 17px;
   font-weight: 700;
   margin-bottom: 10px;
-  color: var(--text);
+  color: var(--ink);
 }
 .modal-body {
   font-size: 13.5px;
-  color: var(--text);
+  color: var(--ink);
   line-height: 1.55;
 }
 .modal-body p {
   margin-bottom: 8px;
 }
 .modal-body .muted2 {
-  color: var(--muted);
+  color: var(--ink-soft);
   font-size: 12.5px;
 }
 .modal-body a {
@@ -515,7 +618,7 @@ body.compact #compact-view {
   border: none;
   border-radius: 7px;
   background: var(--modal-chip);
-  color: var(--text);
+  color: var(--ink);
   cursor: pointer;
   font-size: 12px;
 }
@@ -536,7 +639,7 @@ body.compact #compact-view {
 }
 .modal-btn.secondary {
   background: var(--modal-chip);
-  color: var(--text);
+  color: var(--ink);
 }
 .modal-btn.danger {
   background: var(--danger);
@@ -550,7 +653,7 @@ body.compact #compact-view {
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: rgba(255, 255, 255, 0.1);
   font-size: 12.5px;
-  color: var(--text);
+  color: var(--ink);
 }
 
 /* ---------- Selector de tema (control segmentado) ---------- */
@@ -564,7 +667,7 @@ body.compact #compact-view {
 .seg-btn {
   border: none;
   background: none;
-  color: var(--muted);
+  color: var(--ink-soft);
   font-size: 12px;
   font-weight: 600;
   padding: 4px 10px;
@@ -572,7 +675,7 @@ body.compact #compact-view {
   cursor: pointer;
 }
 .seg-btn:hover {
-  color: var(--text);
+  color: var(--ink);
 }
 .seg-btn.active {
   background: var(--blue);
