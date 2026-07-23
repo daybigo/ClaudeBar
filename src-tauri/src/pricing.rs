@@ -14,22 +14,33 @@ pub struct ModelPrice {
     pub cache_read: f64,
 }
 
-const OPUS: ModelPrice = ModelPrice { input: 15.0, output: 75.0, cache_write_5m: 18.75, cache_read: 1.50 };
+// Precios oficiales de Anthropic (fuente: la tabla de LiteLLM que usa ccusage,
+// verificado 2026-07). La familia Claude 5 se reprecio: Opus bajo de $15/$75
+// (era 4.1) a $5/$25 (4.8), y Fable 5 es el tier premium por encima de Opus.
+// En toda la familia las tarifas de cache son multiplos del input: escritura
+// 5m = 1.25x, escritura 1h = 2x (ver cost_usd), lectura = 0.1x.
+const FABLE5: ModelPrice = ModelPrice { input: 10.0, output: 50.0, cache_write_5m: 12.50, cache_read: 1.00 };
+const OPUS48: ModelPrice = ModelPrice { input: 5.0, output: 25.0, cache_write_5m: 6.25, cache_read: 0.50 };
+const OPUS_LEGACY: ModelPrice = ModelPrice { input: 15.0, output: 75.0, cache_write_5m: 18.75, cache_read: 1.50 };
 const SONNET: ModelPrice = ModelPrice { input: 3.0, output: 15.0, cache_write_5m: 3.75, cache_read: 0.30 };
 const HAIKU: ModelPrice = ModelPrice { input: 1.0, output: 5.0, cache_write_5m: 1.25, cache_read: 0.10 };
 
 /// Devuelve el precio para un id de modelo. Coincidencia por substring para
-/// tolerar sufijos de version (claude-opus-4-8, claude-sonnet-4-6, etc.).
+/// tolerar sufijos de version y fecha (claude-opus-4-8, claude-fable-5, ...).
 pub fn price_for(model: &str) -> ModelPrice {
     let m = model.to_ascii_lowercase();
-    if m.contains("opus") {
-        OPUS
+    if m.contains("fable") {
+        FABLE5
+    } else if m.contains("opus") {
+        // Opus 4.8+ vale $5/$25; las versiones viejas (4.1, 4.0, 3) eran $15/$75.
+        if m.contains("opus-4-1") || m.contains("opus-4-0") || m.contains("opus-3") {
+            OPUS_LEGACY
+        } else {
+            OPUS48
+        }
     } else if m.contains("haiku") {
         HAIKU
     } else if m.contains("sonnet") {
-        SONNET
-    } else if m.contains("fable") {
-        // Fable es un modelo rapido; lo estimamos a nivel Sonnet.
         SONNET
     } else {
         // Desconocido: usamos Sonnet como estimacion media.
