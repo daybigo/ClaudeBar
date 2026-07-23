@@ -6,12 +6,25 @@
 ![Plataforma: Windows 10/11](https://img.shields.io/badge/Plataforma-Windows%2010%2F11-0078D6)
 ![Hecho con: Rust + Tauri](https://img.shields.io/badge/Hecho%20con-Rust%20%2B%20Tauri-orange)
 ![RAM: menos de 30 MB](https://img.shields.io/badge/RAM-%3C30%20MB-success)
+[![Patrocinado por Xtarify](https://img.shields.io/badge/Patrocinado%20por-Xtarify-8b5cf6)](https://xtarify.com)
 
 ![Claude Bar](docs/app.png)
 
 Una pequeña app tipo *menu bar* para Windows que muestra cuánto has usado de tu plan de Claude. Hecha con **Rust + Tauri 2**, así que consume poca RAM (menos de 30 MB) y el binario pesa ~3.6 MB.
 
 > Creado por **Daybi** · *build in public* · open source (MIT)
+
+## Patrocinador
+
+<p align="center">
+  <a href="https://xtarify.com" target="_blank" rel="noopener">
+    <img src="https://img.shields.io/badge/Patrocinado_por-Xtarify-8b5cf6?style=for-the-badge" alt="Xtarify" height="38" />
+  </a>
+</p>
+
+<p align="center">
+  <b>Claude Bar es un proyecto de <a href="https://xtarify.com">Xtarify</a></b> — herramientas y contenido para sacarle el jugo a la IA.
+</p>
 
 ## Por qué
 

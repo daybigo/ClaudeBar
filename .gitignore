@@ -12,6 +12,9 @@ src-tauri/app-icon.png
 # Capturas con datos reales de la cuenta (regenerar limpias antes de publicar)
 docs/panel.png
 
+# Doc privada de vision/arquitectura (no publicar en GitHub)
+claudebar-vision-y-arquitectura.md
+
 # Sistema / logs
 *.log
 .DS_Store
