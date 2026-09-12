@@ -453,46 +453,12 @@ body {
   margin-top: 2px;
 }
 .codex-model .mb-name {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px 6px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 .codex-model .mb-row {
   gap: 8px;
 }
-.mode-badge {
-  font-size: 10px;
-  font-weight: 500;
-  border: 1px solid currentColor;
-  border-radius: 4px;
-  padding: 0 4px;
-  white-space: nowrap;
-}
-.mode-normal { color: var(--orange); }
-.mode-fast { color: #65c9eb; }
-.mode-unknown { color: var(--subtle); }
-.mode-color-normal { background: var(--orange); }
-.mode-color-fast { background: #65c9eb; }
-.mode-color-unknown { background: var(--subtle); }
-.codex-chart-bar {
-  display: flex;
-  flex-direction: column-reverse;
-  overflow: hidden;
-  background: none;
-}
-.codex-chart-bar > span { flex-shrink: 0; }
-.codex-mode-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  color: var(--subtle);
-  font-size: 10px;
-}
-.codex-mode-legend > span { display: inline-flex; align-items: center; gap: 4px; }
-.codex-mode-legend i { width: 7px; height: 7px; border-radius: 2px; }
 
 /* ---------- Acciones ---------- */
 .actions {
