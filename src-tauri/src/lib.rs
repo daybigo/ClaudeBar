@@ -650,7 +650,7 @@ pub fn run() {
                 if *codex_app.state::<AppState>().provider.lock().unwrap() == "codex" {
                     refresh_tray_for_provider(&codex_app);
                 }
-                std::thread::sleep(Duration::from_secs(COST_INTERVAL_SECS));
+                std::thread::sleep(codex::next_refresh_delay());
             });
 
             Ok(())

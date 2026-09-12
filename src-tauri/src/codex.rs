@@ -68,8 +68,39 @@ struct Reader {
     last_fetch: Option<Instant>,
 }
 
+static READER: OnceLock<Mutex<Reader>> = OnceLock::new();
+
+fn remaining(last: Option<Instant>, interval: u64, now: Instant) -> Duration {
+    last.map(|last| Duration::from_secs(interval).saturating_sub(now.saturating_duration_since(last)))
+        .unwrap_or_default()
+}
+
+impl Reader {
+    fn due(&self, now: Instant, force: bool) -> (bool, bool) {
+        let scan = force || remaining(self.last_scan, COST_INTERVAL_SECS, now).is_zero();
+        let usage_interval = if force { MANUAL_REFRESH_MIN_SECS } else { USAGE_INTERVAL_SECS };
+        let fetch = self.status.connected && remaining(self.last_fetch, usage_interval, now).is_zero();
+        (scan, fetch)
+    }
+
+    fn next_delay(&self, now: Instant) -> Duration {
+        if !self.status.connected && self.last_scan.is_none() {
+            return Duration::from_secs(COST_INTERVAL_SECS);
+        }
+        let cost = remaining(self.last_scan, COST_INTERVAL_SECS, now);
+        let delay = if self.status.connected {
+            cost.min(remaining(self.last_fetch, USAGE_INTERVAL_SECS, now))
+        } else { cost };
+        delay.max(Duration::from_millis(100))
+    }
+}
+
+pub fn next_refresh_delay() -> Duration {
+    READER.get_or_init(|| Mutex::new(Reader::default())).lock().unwrap()
+        .next_delay(Instant::now())
+}
+
 pub fn read(force: bool) -> CodexStatus {
-    static READER: OnceLock<Mutex<Reader>> = OnceLock::new();
     let mut reader = READER.get_or_init(|| Mutex::new(Reader::default())).lock().unwrap();
     let Some(home) = codex_home() else {
         return CodexStatus::default();
@@ -79,6 +110,7 @@ pub fn read(force: bool) -> CodexStatus {
         return CodexStatus::default();
     };
     let Ok(root) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        *reader = Reader::default();
         return CodexStatus::default();
     };
     let id_token = root
@@ -104,15 +136,12 @@ pub fn read(force: bool) -> CodexStatus {
     if reader.account != account {
         *reader = Reader { account, ..Default::default() };
     }
-    if !force && reader.last_scan.is_some_and(|t| t.elapsed() < Duration::from_secs(COST_INTERVAL_SECS)) {
-        return reader.status.clone();
-    }
     reader.status.connected = !access_token.is_empty();
     reader.status.email = email;
     if reader.status.plan.is_empty() { reader.status.plan = label_plan(plan_type); }
-    if !access_token.is_empty() && reader.last_fetch.is_none_or(|t| {
-        t.elapsed() >= Duration::from_secs(if force { MANUAL_REFRESH_MIN_SECS } else { USAGE_INTERVAL_SECS })
-    }) {
+    let (scan_due, fetch_due) = reader.due(Instant::now(), force);
+    if !scan_due && !fetch_due { return reader.status.clone(); }
+    if fetch_due {
         reader.last_fetch = Some(Instant::now());
         match fetch_usage(access_token, account_id) {
             Ok(value) => {
@@ -124,14 +153,16 @@ pub fn read(force: bool) -> CodexStatus {
             Err(error) => reader.status.usage_error = Some(error.to_string()),
         }
     }
-    if reader.status.usage_source != "api" {
+    if scan_due && reader.status.usage_source != "api" {
         let (primary, secondary) = read_usage(&home);
         reader.status.primary = primary;
         reader.status.secondary = secondary;
         reader.status.usage_source = "local".to_string();
     }
-    reader.status.cost = Some(reader.costs.compute(&home));
-    reader.last_scan = Some(Instant::now());
+    if scan_due {
+        reader.status.cost = Some(reader.costs.compute(&home));
+        reader.last_scan = Some(Instant::now());
+    }
     reader.status.clone()
 }
 
@@ -324,6 +355,33 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn api_deadline_does_not_wait_for_the_next_cost_refresh() {
+        let now = Instant::now();
+        let reader = Reader {
+            status: CodexStatus { connected: true, ..Default::default() },
+            last_scan: Some(now - Duration::from_secs(10)),
+            last_fetch: Some(now - Duration::from_secs(297)),
+            ..Default::default()
+        };
+        assert_eq!(reader.due(now, false), (false, false));
+        assert_eq!(reader.next_delay(now), Duration::from_secs(3));
+        assert_eq!(reader.due(now + Duration::from_secs(3), false), (false, true));
+    }
+
+    #[test]
+    fn manual_refresh_keeps_the_shared_twenty_second_api_limit() {
+        let now = Instant::now();
+        let reader = Reader {
+            status: CodexStatus { connected: true, ..Default::default() },
+            last_scan: Some(now), last_fetch: Some(now - Duration::from_secs(19)),
+            ..Default::default()
+        };
+        assert_eq!(reader.due(now, true), (true, false));
+        assert_eq!(reader.due(now + Duration::from_secs(1), true), (true, true));
+        assert_eq!(Reader::default().next_delay(now), Duration::from_secs(60));
+    }
 
     #[test]
     fn api_usage_preserves_real_windows_and_credit_units() {
