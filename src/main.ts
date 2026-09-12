@@ -59,14 +59,22 @@ interface CostReport {
   updatedAt: string;
   empty: boolean;
 }
+type CodexMode = "normal" | "fast" | "unknown";
+interface CodexDay {
+  date: string;
+  normal: number;
+  fast: number;
+  unknown: number;
+}
 interface CodexCost {
   todayUsd: number;
   last30Usd: number;
   monthTokens: number;
   weekTokens: number;
   last30Tokens: number;
-  daily: number[];
-  models: { model: string; tokens: number; costUsd: number | null }[];
+  daily: CodexDay[];
+  models: { model: string; mode: CodexMode; tokens: number; costUsd: number | null }[];
+  unknownModeTokens: number;
   unpricedTokens: number;
   updatedAt: string;
   empty: boolean;
@@ -86,11 +94,16 @@ const I18N: Record<string, Dict> = {
     costNote: "≈ valor equivalente en API · tu plan lo cubre",
     gToday: "Hoy", g30: "30 días", gMonthTok: "Tokens (mes)", gWeekTok: "Tokens (sem)", topModel: "Modelo top",
     byModel: "Uso por modelo (30 días)",
-    codexCostNote: "≈ equivalente API estándar · estimación, no cargo real",
+    codexCostNote: "≈ equivalente API · estimación, no cargo real",
     codexScope: "Historial local de este equipo · tokens incluyen caché",
-    codexPriceBasis: "Tarifa base; no incluye recargos por velocidad, contexto largo ni herramientas.",
+    codexPriceBasis: "Tarifas API Normal/Fast según el modo registrado; no son multiplicadores de créditos del plan. Excluye contexto largo y herramientas.",
+    modeNormal: "Normal", modeFast: "Fast", modeUnknown: "Modo desconocido",
+    codexUnknownMode: "{n} tokens sin dato de modo: costo estimado a tarifa base; podría faltar el recargo Fast.",
+    codexBaseEstimate: "Estimación base: el historial no identifica el modo.",
+    codexDailyCost: "Costo diario estimado · 30 días",
+    byModelMode: "Uso por modelo y modo (30 días)",
     codexEmpty: "Aún no hay consumo registrado en los últimos 30 días.",
-    codexPartial: "Estimación parcial: hay modelos sin tarifa conocida.",
+    codexPartial: "Estimación parcial: hay modelos o modos sin tarifa conocida.",
     codexIncomplete: "No se pudo leer parte del historial local.",
     tokenShare: "Participación en tokens · 30 días",
     noPrice: "Sin tarifa",
@@ -120,11 +133,16 @@ const I18N: Record<string, Dict> = {
     costNote: "≈ API-equivalent value · covered by your plan",
     gToday: "Today", g30: "30 days", gMonthTok: "Tokens (month)", gWeekTok: "Tokens (week)", topModel: "Top model",
     byModel: "By model (30 days)",
-    codexCostNote: "≈ standard API equivalent · estimate, not an actual charge",
+    codexCostNote: "≈ API equivalent · estimate, not an actual charge",
     codexScope: "Local history on this computer · tokens include cache",
-    codexPriceBasis: "Base rates; excludes speed, long-context and tool surcharges.",
+    codexPriceBasis: "Standard/Fast API rates for the recorded mode, not plan credit multipliers. Excludes long context and tools.",
+    modeNormal: "Normal", modeFast: "Fast", modeUnknown: "Unknown mode",
+    codexUnknownMode: "{n} tokens have no mode recorded: cost uses base rates; the Fast surcharge may be missing.",
+    codexBaseEstimate: "Base estimate: the history does not identify the mode.",
+    codexDailyCost: "Estimated daily cost · 30 days",
+    byModelMode: "By model and mode (30 days)",
     codexEmpty: "No usage recorded in the last 30 days yet.",
-    codexPartial: "Partial estimate: some models have no known price.",
+    codexPartial: "Partial estimate: some models or modes have no known price.",
     codexIncomplete: "Some local history could not be read.",
     tokenShare: "Share of tokens · 30 days",
     noPrice: "No price",
@@ -312,6 +330,25 @@ const PROVIDER_OPEN: Partial<Record<Provider, string>> = {
 };
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
+const CODEX_MODES: CodexMode[] = ["normal", "fast", "unknown"];
+function codexModeLabel(mode: CodexMode): string {
+  return t({ normal: "modeNormal", fast: "modeFast", unknown: "modeUnknown" }[mode]);
+}
+function codexChart(daily: CodexDay[]): string {
+  const total = (day: CodexDay) => day.normal + day.fast + day.unknown;
+  const max = Math.max(0.0001, ...daily.map(total));
+  return daily.map((day) => {
+    const sum = total(day);
+    const date = new Date(`${day.date}T12:00:00`).toLocaleDateString(lang, { day: "numeric", month: "short" });
+    const details = CODEX_MODES.filter((mode) => day[mode] > 0)
+      .map((mode) => `${codexModeLabel(mode)}: ${fmtUsd(day[mode])}${mode === "unknown" ? "*" : ""}`);
+    const label = `${date} · ${details.join(" · ") || fmtUsd(0)}`;
+    return `<div class="chart-bar codex-chart-bar" role="img" aria-label="${esc(label)}" title="${esc(label)}"
+      style="height:${sum > 0 ? Math.max(4, sum / max * 100) : 0}%">${CODEX_MODES.map((mode) =>
+        `<span class="mode-color-${mode}" style="height:${sum > 0 ? day[mode] / sum * 100 : 0}%"></span>`).join("")}</div>`;
+  }).join("");
+}
+
 function codexMetrics(st: ProviderStatus): string {
   const extraLimits = (st.additional || [])
     .filter((limit) => limit.label.toLowerCase() !== "gpt-5.3-codex-spark")
@@ -331,14 +368,14 @@ function codexMetrics(st: ProviderStatus): string {
     const models = c.models.map((m) => {
       const share = c.last30Tokens > 0 ? m.tokens / c.last30Tokens * 100 : 0;
       return `<div class="codex-model"><div class="mb-row">
-        <span class="mb-name">${esc(prettyModel(m.model))}</span>
+        <span class="mb-name">${esc(prettyModel(m.model))}<span class="mode-badge mode-${m.mode}">${codexModeLabel(m.mode)}</span></span>
         <span class="mb-tok">${fmtTokens(m.tokens)}</span>
-        <span class="mb-cost">${m.costUsd === null ? t("noPrice") : fmtUsd(m.costUsd)}</span></div>
-        <div class="bar" role="meter" aria-label="${esc(prettyModel(m.model))}: ${t("tokenShare")}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${share.toFixed(1)}"
-          title="${share.toFixed(1)}% · ${t("tokenShare")}"><div class="fill" style="width:${share}%"></div></div></div>`;
+        <span class="mb-cost"${m.mode === "unknown" ? ` title="${t("codexBaseEstimate")}"` : ""}>${m.costUsd === null ? t("noPrice") : `${fmtUsd(m.costUsd)}${m.mode === "unknown" ? "*" : ""}`}</span></div>
+        <div class="bar" role="meter" aria-label="${esc(prettyModel(m.model))} · ${codexModeLabel(m.mode)}: ${t("tokenShare")}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${share.toFixed(1)}"
+          title="${share.toFixed(1)}% · ${t("tokenShare")}"><div class="fill mode-color-${m.mode}" style="width:${share}%"></div></div></div>`;
     }).join("");
     const hasPrices = c.models.some((m) => m.costUsd !== null);
-    const money = (n: number) => c.empty ? "—" : hasPrices ? `${fmtUsd(n)}${c.unpricedTokens ? "*" : ""}` : "—";
+    const money = (n: number) => c.empty ? "—" : hasPrices ? `${fmtUsd(n)}${c.unpricedTokens || c.unknownModeTokens ? "*" : ""}` : "—";
     cost = `<hr class="rule" /><section class="block cost">
       <h2>${t("cost")}</h2>
       <div class="cost-grid">
@@ -347,11 +384,14 @@ function codexMetrics(st: ProviderStatus): string {
         <div class="cg-cell"><div class="cg-label">${t("gMonthTok")}</div><div class="cg-value">${fmtTokens(c.monthTokens)}</div></div>
         <div class="cg-cell"><div class="cg-label">${t("gWeekTok")}</div><div class="cg-value">${fmtTokens(c.weekTokens)}</div></div>
       </div>
-      ${hasPrices ? `<div class="chart">${chartBars(c.daily)}</div>` : ""}
-      ${c.empty ? `<p class="pnote">${t("codexEmpty")}</p>` : `<div class="model-breakdown"><div class="mb-head">${t("byModel")}</div>${models}
+      ${hasPrices ? `<div class="cost-line subtle">${t("codexDailyCost")}</div><div class="chart">${codexChart(c.daily)}</div>
+        <div class="codex-mode-legend">${CODEX_MODES.filter((mode) => c.models.some((m) => m.mode === mode))
+          .map((mode) => `<span><i class="mode-color-${mode}"></i>${codexModeLabel(mode)}</span>`).join("")}</div>` : ""}
+      ${c.empty ? `<p class="pnote">${t("codexEmpty")}</p>` : `<div class="model-breakdown"><div class="mb-head">${t("byModelMode")}</div>${models}
         <div class="cost-line subtle">${t("tokenShare")}</div></div>`}
       <div class="cost-line subtle" title="${t("codexPriceBasis")}">${t("codexCostNote")}</div>
       <div class="cost-line subtle">${t("codexScope")}</div>
+      ${c.unknownModeTokens ? `<div class="cost-line subtle">* ${t("codexUnknownMode").replace("{n}", fmtTokens(c.unknownModeTokens))}</div>` : ""}
       ${c.unpricedTokens ? `<div class="cost-line subtle">* ${t("codexPartial")}</div>` : ""}
       ${c.incomplete ? `<div class="cost-line subtle">${t("codexIncomplete")}</div>` : ""}
     </section>`;
