@@ -29,6 +29,8 @@ use tauri_plugin_opener::OpenerExt;
 const USAGE_INTERVAL_SECS: u64 = 300;
 /// Cada cuanto recalculamos el costo desde los logs locales.
 const COST_INTERVAL_SECS: u64 = 60;
+/// Mismo intervalo mínimo para el refresco manual de Claude y Codex.
+const MANUAL_REFRESH_MIN_SECS: u64 = 20;
 
 struct AppState {
     usage: Mutex<UsageSnapshot>,
@@ -111,7 +113,7 @@ fn refresh_now(app: AppHandle) {
         .last_usage_fetch
         .lock()
         .unwrap()
-        .map(|t| t.elapsed() < Duration::from_secs(20))
+        .map(|t| t.elapsed() < Duration::from_secs(MANUAL_REFRESH_MIN_SECS))
         .unwrap_or(false);
     if !recent {
         let a = app.clone();

@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use walkdir::WalkDir;
 use crate::codex_cost::{CostCache, CostReport};
+use crate::{COST_INTERVAL_SECS, MANUAL_REFRESH_MIN_SECS, USAGE_INTERVAL_SECS};
 
 #[derive(Serialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
@@ -103,14 +104,14 @@ pub fn read(force: bool) -> CodexStatus {
     if reader.account != account {
         *reader = Reader { account, ..Default::default() };
     }
-    if !force && reader.last_scan.is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
+    if !force && reader.last_scan.is_some_and(|t| t.elapsed() < Duration::from_secs(COST_INTERVAL_SECS)) {
         return reader.status.clone();
     }
     reader.status.connected = !access_token.is_empty();
     reader.status.email = email;
     if reader.status.plan.is_empty() { reader.status.plan = label_plan(plan_type); }
     if !access_token.is_empty() && reader.last_fetch.is_none_or(|t| {
-        t.elapsed() >= Duration::from_secs(if force { 20 } else { 300 })
+        t.elapsed() >= Duration::from_secs(if force { MANUAL_REFRESH_MIN_SECS } else { USAGE_INTERVAL_SECS })
     }) {
         reader.last_fetch = Some(Instant::now());
         match fetch_usage(access_token, account_id) {

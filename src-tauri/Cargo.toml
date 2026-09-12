@@ -1,6 +1,6 @@
 [package]
 name = "claudebar"
-version = "0.3.0"
+version = "0.3.1"
 description = "Monitor de uso de Claude para la bandeja de Windows (estilo CodexBar)"
 authors = ["Daybi"]
 edition = "2021"

@@ -313,10 +313,12 @@ const PROVIDER_OPEN: Partial<Record<Provider, string>> = {
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 function codexMetrics(st: ProviderStatus): string {
-  const extraLimits = (st.additional || []).map((limit) => {
-    const bars = usageBars({ connected: true, email: "", plan: "", ...limit });
-    return bars ? `<div class="pgroup">${esc(limit.label)}</div>${bars}` : "";
-  }).join("");
+  const extraLimits = (st.additional || [])
+    .filter((limit) => limit.label.toLowerCase() !== "gpt-5.3-codex-spark")
+    .map((limit) => {
+      const bars = usageBars({ connected: true, email: "", plan: "", ...limit });
+      return bars ? `<div class="pgroup">${esc(limit.label)}</div>${bars}` : "";
+    }).join("");
   const credits = st.credits
     ? `<hr class="rule" /><section class="block"><h2>${t("credits")}</h2>
         <div class="bar-foot"><span class="muted">${t("balance")}</span>
