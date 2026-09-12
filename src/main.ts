@@ -363,6 +363,9 @@ function providerCard(p: Provider, st: ProviderStatus): string {
   const label = PROVIDER_LABELS[p];
   const initial = esc(label.charAt(0));
   if (!st.connected) {
+    if (p === "codex") {
+      return `<hr class="rule" /><p class="pnote">${t("connectHint").replace("{p}", esc(label))}</p>`;
+    }
     return `<div class="pcard">
         <div class="pemblem off">${initial}</div>
         <div class="pplan">${t("notConnected")}</div>
@@ -384,15 +387,14 @@ function providerCard(p: Provider, st: ProviderStatus): string {
     : "";
   if (p === "codex") {
     const source = st.usageSource === "local" ? t("localLimits") : st.usageError ? t("savedLimits") : "";
-    return `<div class="pdash">${head}<hr class="rule" />${bars || `<p class="pnote">${t("usageNotHere")}</p>`}
+    return `<div><hr class="rule" />${bars || `<p class="pnote">${t("usageNotHere")}</p>`}
       ${source ? `<div class="cost-line subtle">${source}${st.usageUpdatedAt ? ` · ${relTime(st.usageUpdatedAt)}` : ""}</div>` : ""}
-      ${st.usageError ? `<div class="cost-line subtle">${esc(errText(st.usageError))}</div>` : ""}
       ${codexMetrics(st)}<hr class="rule" />
       <section class="actions">
         <button class="action" data-act="open:https://chatgpt.com/codex/settings/usage"><span class="ic">▥</span>${t("dashboard")}</button>
         <button class="action" data-act="open:https://status.openai.com"><span class="ic">⟋</span>${t("status")}</button>
         <button class="action" data-act="refresh-codex"><span class="ic">⟳</span>${t("refresh")}</button>
-      </section>${openBtn}</div>`;
+      </section></div>`;
   }
   if (bars) {
     // Dashboard completo: cuenta + medidores (mismo estilo que Claude) + abrir.
@@ -414,7 +416,15 @@ async function refreshExternal(p: Provider, command: string): Promise<void> {
   applyExternal(p, st);
 }
 
+function codexSubtitle(st: ProviderStatus): string {
+  if (!st.connected) return t("notConnected");
+  const detail = st.usageError ? errText(st.usageError)
+    : st.usageUpdatedAt ? relTime(st.usageUpdatedAt) : t("localLimits");
+  return `${st.plan || "ChatGPT"} · ${detail}`;
+}
+
 function applyExternal(p: Provider, st: ProviderStatus): void {
+  if (p === "codex") lastCodex = st;
   const usageVals: number[] = [];
   if (st.primary) usageVals.push(st.primary.usedPercent);
   if (st.secondary) usageVals.push(st.secondary.usedPercent);
@@ -425,7 +435,9 @@ function applyExternal(p: Provider, st: ProviderStatus): void {
   $("plan-badge").textContent = st.connected ? st.plan : "";
   const updated = $("updated");
   updated.classList.toggle("stale", Boolean(st.usageError));
-  updated.textContent = st.connected
+  if (p === "codex") updated.title = st.email;
+  else updated.removeAttribute("title");
+  updated.textContent = p === "codex" ? codexSubtitle(st) : st.connected
     ? st.email
       ? `${t("connected")} · ${st.email}`
       : t("connected")
@@ -439,7 +451,9 @@ function applyProvider(p: Provider): void {
   const isClaude = p === "claude";
   $("data-sections").classList.toggle("hidden", !isClaude);
   $("soon").classList.toggle("hidden", isClaude);
+  $("soon").classList.toggle("codex-view", p === "codex");
   if (isClaude) {
+    $("updated").removeAttribute("title");
     if (lastUsage) applyUsage(lastUsage);
     return;
   }
@@ -464,6 +478,7 @@ const COMPACT = { w: 228, h: 112 };
 
 let lastUsage: UsageSnapshot | null = null;
 let lastCost: CostReport | null = null;
+let lastCodex: ProviderStatus | null = null;
 let lastUpdatedIso = "";
 let lastPlan = "";
 
@@ -857,7 +872,9 @@ async function main() {
   }, 1500);
 
   setInterval(() => {
-    if (loadProvider() === "claude" && lastUpdatedIso && !$("updated").classList.contains("stale")) {
+    if (loadProvider() === "codex" && lastCodex) {
+      $("updated").textContent = codexSubtitle(lastCodex);
+    } else if (loadProvider() === "claude" && lastUpdatedIso && !$("updated").classList.contains("stale")) {
       $("updated").textContent = `${lastPlan} · ${relTime(lastUpdatedIso)}`;
     }
   }, 20_000);
