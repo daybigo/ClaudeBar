@@ -3,6 +3,7 @@
 mod antigravity;
 mod claude_api;
 mod codex;
+mod codex_cost;
 mod cost;
 mod credentials;
 mod model;
@@ -68,8 +69,17 @@ fn get_antigravity() -> antigravity::AntigravityStatus {
 }
 
 #[tauri::command]
-fn get_codex() -> codex::CodexStatus {
-    codex::read()
+async fn get_codex() -> codex::CodexStatus {
+    tauri::async_runtime::spawn_blocking(|| codex::read(false)).await.unwrap_or_default()
+}
+
+#[tauri::command]
+fn refresh_codex(app: AppHandle) {
+    std::thread::spawn(move || {
+        let status = codex::read(true);
+        let _ = app.emit("codex-updated", status);
+        refresh_tray_for_provider(&app);
+    });
 }
 
 #[tauri::command]
@@ -272,7 +282,7 @@ fn refresh_tray_for_provider(app: &AppHandle) {
     let provider = app.state::<AppState>().provider.lock().unwrap().clone();
     match provider.as_str() {
         "codex" => {
-            let st = codex::read();
+            let st = codex::read(false);
             let pct = max_pct(
                 [st.primary.as_ref(), st.secondary.as_ref()]
                     .into_iter()
@@ -532,6 +542,7 @@ pub fn run() {
             get_cost,
             get_antigravity,
             get_codex,
+            refresh_codex,
             set_provider,
             refresh_now,
             quit,
@@ -630,6 +641,15 @@ pub fn run() {
             std::thread::spawn(move || run_usage_loop(h1));
             let h2 = app.handle().clone();
             std::thread::spawn(move || run_cost_loop(h2));
+            let codex_app = app.handle().clone();
+            std::thread::spawn(move || loop {
+                let status = codex::read(false);
+                let _ = codex_app.emit("codex-updated", status);
+                if *codex_app.state::<AppState>().provider.lock().unwrap() == "codex" {
+                    refresh_tray_for_provider(&codex_app);
+                }
+                std::thread::sleep(Duration::from_secs(COST_INTERVAL_SECS));
+            });
 
             Ok(())
         })

@@ -442,6 +442,20 @@ body {
   min-width: 60px;
   text-align: right;
 }
+.codex-model {
+  margin-bottom: 7px;
+}
+.codex-model .bar {
+  height: 4px;
+  margin-top: 2px;
+}
+.codex-model .mb-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.codex-model .mb-row {
+  gap: 8px;
+}
 
 /* ---------- Acciones ---------- */
 .actions {

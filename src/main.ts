@@ -59,6 +59,19 @@ interface CostReport {
   updatedAt: string;
   empty: boolean;
 }
+interface CodexCost {
+  todayUsd: number;
+  last30Usd: number;
+  monthTokens: number;
+  weekTokens: number;
+  last30Tokens: number;
+  daily: number[];
+  models: { model: string; tokens: number; costUsd: number | null }[];
+  unpricedTokens: number;
+  updatedAt: string;
+  empty: boolean;
+  incomplete: boolean;
+}
 
 // ----- i18n -----
 type Dict = Record<string, string>;
@@ -73,6 +86,16 @@ const I18N: Record<string, Dict> = {
     costNote: "≈ valor equivalente en API · tu plan lo cubre",
     gToday: "Hoy", g30: "30 días", gMonthTok: "Tokens (mes)", gWeekTok: "Tokens (sem)", topModel: "Modelo top",
     byModel: "Uso por modelo (30 días)",
+    codexCostNote: "≈ equivalente API estándar · estimación, no cargo real",
+    codexScope: "Historial local de este equipo · tokens incluyen caché",
+    codexPriceBasis: "Tarifa base; no incluye recargos por velocidad, contexto largo ni herramientas.",
+    codexEmpty: "Aún no hay consumo registrado en los últimos 30 días.",
+    codexPartial: "Estimación parcial: hay modelos sin tarifa conocida.",
+    codexIncomplete: "No se pudo leer parte del historial local.",
+    tokenShare: "Participación en tokens · 30 días",
+    noPrice: "Sin tarifa",
+    credits: "Créditos extra", balance: "Saldo disponible", unlimited: "Sin límite",
+    localLimits: "Límites del último registro local", savedLimits: "Última consulta guardada",
     thisMonth: "Este mes", updatedJust: "actualizado recién", ago: "hace",
     connect: "Conecta Claude Code para ver tu uso", langBtn: "English",
     errExpired: "Sesión expirada — abre Claude Code para renovar",
@@ -97,6 +120,16 @@ const I18N: Record<string, Dict> = {
     costNote: "≈ API-equivalent value · covered by your plan",
     gToday: "Today", g30: "30 days", gMonthTok: "Tokens (month)", gWeekTok: "Tokens (week)", topModel: "Top model",
     byModel: "By model (30 days)",
+    codexCostNote: "≈ standard API equivalent · estimate, not an actual charge",
+    codexScope: "Local history on this computer · tokens include cache",
+    codexPriceBasis: "Base rates; excludes speed, long-context and tool surcharges.",
+    codexEmpty: "No usage recorded in the last 30 days yet.",
+    codexPartial: "Partial estimate: some models have no known price.",
+    codexIncomplete: "Some local history could not be read.",
+    tokenShare: "Share of tokens · 30 days",
+    noPrice: "No price",
+    credits: "Extra credits", balance: "Available balance", unlimited: "Unlimited",
+    localLimits: "Limits from the last local record", savedLimits: "Last saved lookup",
     thisMonth: "This month", updatedJust: "updated just now", ago: "ago",
     connect: "Connect Claude Code to see your usage", langBtn: "Español",
     errExpired: "Session expired — open Claude Code to renew",
@@ -179,6 +212,12 @@ interface ProviderStatus {
   primary?: UsageWindow | null;
   secondary?: UsageWindow | null;
   buckets?: AntigravityBucket[];
+  additional?: { label: string; primary: UsageWindow | null; secondary: UsageWindow | null }[];
+  credits?: { balance: number | null; unlimited: boolean; hasCredits: boolean } | null;
+  cost?: CodexCost | null;
+  usageSource?: string;
+  usageUpdatedAt?: string;
+  usageError?: string | null;
 }
 function bucketLabel(b: AntigravityBucket): string {
   if (b.window === "5h") return t("session");
@@ -273,6 +312,51 @@ const PROVIDER_OPEN: Partial<Record<Provider, string>> = {
 };
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
+function codexMetrics(st: ProviderStatus): string {
+  const extraLimits = (st.additional || []).map((limit) => {
+    const bars = usageBars({ connected: true, email: "", plan: "", ...limit });
+    return bars ? `<div class="pgroup">${esc(limit.label)}</div>${bars}` : "";
+  }).join("");
+  const credits = st.credits
+    ? `<hr class="rule" /><section class="block"><h2>${t("credits")}</h2>
+        <div class="bar-foot"><span class="muted">${t("balance")}</span>
+        <span class="muted">${st.credits.unlimited ? t("unlimited") : st.credits.balance === null ? "—" :
+          new Intl.NumberFormat(lang, { maximumFractionDigits: 2 }).format(st.credits.balance)}</span></div></section>`
+    : "";
+  const c = st.cost;
+  let cost = `<p class="pnote">${t("loadingProvider")}</p>`;
+  if (c) {
+    const models = c.models.map((m) => {
+      const share = c.last30Tokens > 0 ? m.tokens / c.last30Tokens * 100 : 0;
+      return `<div class="codex-model"><div class="mb-row">
+        <span class="mb-name">${esc(prettyModel(m.model))}</span>
+        <span class="mb-tok">${fmtTokens(m.tokens)}</span>
+        <span class="mb-cost">${m.costUsd === null ? t("noPrice") : fmtUsd(m.costUsd)}</span></div>
+        <div class="bar" role="meter" aria-label="${esc(prettyModel(m.model))}: ${t("tokenShare")}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${share.toFixed(1)}"
+          title="${share.toFixed(1)}% · ${t("tokenShare")}"><div class="fill" style="width:${share}%"></div></div></div>`;
+    }).join("");
+    const hasPrices = c.models.some((m) => m.costUsd !== null);
+    const money = (n: number) => c.empty ? "—" : hasPrices ? `${fmtUsd(n)}${c.unpricedTokens ? "*" : ""}` : "—";
+    cost = `<hr class="rule" /><section class="block cost">
+      <h2>${t("cost")}</h2>
+      <div class="cost-grid">
+        <div class="cg-cell"><div class="cg-label">${t("gToday")}</div><div class="cg-value">${money(c.todayUsd)}</div></div>
+        <div class="cg-cell"><div class="cg-label">${t("g30")}</div><div class="cg-value">${money(c.last30Usd)}</div></div>
+        <div class="cg-cell"><div class="cg-label">${t("gMonthTok")}</div><div class="cg-value">${fmtTokens(c.monthTokens)}</div></div>
+        <div class="cg-cell"><div class="cg-label">${t("gWeekTok")}</div><div class="cg-value">${fmtTokens(c.weekTokens)}</div></div>
+      </div>
+      ${hasPrices ? `<div class="chart">${chartBars(c.daily)}</div>` : ""}
+      ${c.empty ? `<p class="pnote">${t("codexEmpty")}</p>` : `<div class="model-breakdown"><div class="mb-head">${t("byModel")}</div>${models}
+        <div class="cost-line subtle">${t("tokenShare")}</div></div>`}
+      <div class="cost-line subtle" title="${t("codexPriceBasis")}">${t("codexCostNote")}</div>
+      <div class="cost-line subtle">${t("codexScope")}</div>
+      ${c.unpricedTokens ? `<div class="cost-line subtle">* ${t("codexPartial")}</div>` : ""}
+      ${c.incomplete ? `<div class="cost-line subtle">${t("codexIncomplete")}</div>` : ""}
+    </section>`;
+  }
+  return `${extraLimits}${credits}${cost}`;
+}
+
 function providerCard(p: Provider, st: ProviderStatus): string {
   const label = PROVIDER_LABELS[p];
   const initial = esc(label.charAt(0));
@@ -296,6 +380,18 @@ function providerCard(p: Provider, st: ProviderStatus): string {
   const openBtn = url
     ? `<button class="pcard-btn wide" data-act="open:${url}">${t("open")} ${esc(label)} ↗</button>`
     : "";
+  if (p === "codex") {
+    const source = st.usageSource === "local" ? t("localLimits") : st.usageError ? t("savedLimits") : "";
+    return `<div class="pdash">${head}<hr class="rule" />${bars || `<p class="pnote">${t("usageNotHere")}</p>`}
+      ${source ? `<div class="cost-line subtle">${source}${st.usageUpdatedAt ? ` · ${relTime(st.usageUpdatedAt)}` : ""}</div>` : ""}
+      ${st.usageError ? `<div class="cost-line subtle">${esc(errText(st.usageError))}</div>` : ""}
+      ${codexMetrics(st)}<hr class="rule" />
+      <section class="actions">
+        <button class="action" data-act="open:https://chatgpt.com/codex/settings/usage"><span class="ic">▥</span>${t("dashboard")}</button>
+        <button class="action" data-act="open:https://status.openai.com"><span class="ic">⟋</span>${t("status")}</button>
+        <button class="action" data-act="refresh-codex"><span class="ic">⟳</span>${t("refresh")}</button>
+      </section>${openBtn}</div>`;
+  }
   if (bars) {
     // Dashboard completo: cuenta + medidores (mismo estilo que Claude) + abrir.
     return `<div class="pdash">${head}<hr class="rule" />${bars}${openBtn}</div>`;
@@ -313,6 +409,10 @@ async function refreshExternal(p: Provider, command: string): Promise<void> {
   } catch (e) {
     console.error(command, e);
   }
+  applyExternal(p, st);
+}
+
+function applyExternal(p: Provider, st: ProviderStatus): void {
   const usageVals: number[] = [];
   if (st.primary) usageVals.push(st.primary.usedPercent);
   if (st.secondary) usageVals.push(st.secondary.usedPercent);
@@ -322,7 +422,7 @@ async function refreshExternal(p: Provider, command: string): Promise<void> {
   if (loadProvider() !== p) return; // el usuario cambió mientras tanto
   $("plan-badge").textContent = st.connected ? st.plan : "";
   const updated = $("updated");
-  updated.classList.remove("stale");
+  updated.classList.toggle("stale", Boolean(st.usageError));
   updated.textContent = st.connected
     ? st.email
       ? `${t("connected")} · ${st.email}`
@@ -490,23 +590,24 @@ function applyUsage(u: UsageSnapshot) {
   $("extra-pct").textContent = `${fmtPct(ex.utilization)} ${t("used")}`;
 }
 
-function renderChart(daily: number[]) {
-  const el = $("cost-chart");
-  if (!daily.length) {
-    el.innerHTML = "";
-    return;
-  }
+function chartBars(daily: number[]): string {
+  if (!daily.length) return "";
   const max = Math.max(0.0001, ...daily);
-  el.innerHTML = daily
+  return daily
     .map((v) => {
       const h = v > 0 ? Math.max(6, Math.round((v / max) * 100)) : 0;
       return `<div class="chart-bar" style="height:${h}%" title="$ ${v.toFixed(2)}"></div>`;
     })
     .join("");
 }
+function renderChart(daily: number[]) {
+  $("cost-chart").innerHTML = chartBars(daily);
+}
 // Nombre bonito del modelo: "claude-fable-5" -> "Fable 5", "claude-opus-4-8" -> "Opus 4.8".
 function prettyModel(id: string): string {
   const m = id.toLowerCase();
+  if (m.startsWith("gpt-")) return id.replace(/^gpt-/i, "GPT-").replace(/-(astra|sol|terra|luna|codex|spark|mini|nano|pro)/gi,
+    (_, name: string) => ` ${name.charAt(0).toUpperCase()}${name.slice(1)}`);
   const fam = ["opus", "sonnet", "haiku", "fable"].find((f) => m.includes(f));
   if (!fam) return id;
   const nums = (m.split(fam)[1] || "").match(/\d+/g)?.filter((n) => n.length <= 2) ?? [];
@@ -666,6 +767,9 @@ async function handleAction(act: string) {
     case "refresh":
       await invoke("refresh_now");
       break;
+    case "refresh-codex":
+      await invoke("refresh_codex");
+      break;
     case "settings":
       await showSettings();
       break;
@@ -727,6 +831,7 @@ async function main() {
 
   await listen<UsageSnapshot>("usage-updated", (e) => applyUsage(e.payload));
   await listen<CostReport>("cost-updated", (e) => applyCost(e.payload));
+  await listen<ProviderStatus>("codex-updated", (e) => applyExternal("codex", e.payload));
 
   try {
     applyUsage(await invoke<UsageSnapshot>("get_usage"));
@@ -750,7 +855,7 @@ async function main() {
   }, 1500);
 
   setInterval(() => {
-    if (lastUpdatedIso && !$("updated").classList.contains("stale")) {
+    if (loadProvider() === "claude" && lastUpdatedIso && !$("updated").classList.contains("stale")) {
       $("updated").textContent = `${lastPlan} · ${relTime(lastUpdatedIso)}`;
     }
   }, 20_000);
