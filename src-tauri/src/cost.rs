@@ -6,21 +6,30 @@
 //!  - multiplica tokens por el precio del modelo
 //!
 //! Nota: Claude Code no guarda el costo real, asi que esto es una ESTIMACION.
-//! Los tokens "mostrados" excluyen la lectura de cache (que es enorme y barata)
-//! para que el numero se parezca al de los dashboards oficiales.
+//! Los tokens mostrados son el total procesado (input + output + escritura y
+//! lectura de cache), igual que en Codex, para que ambos se comparen 1 a 1.
+//!
+//! El escaneo es incremental: cada archivo recuerda hasta que byte se leyo y
+//! solo se parsean las lineas nuevas. Antes se releian ~2 GB de logs cada 60s.
 
 use crate::credentials::claude_dir;
 use crate::model::{CostReport, ModelUsage};
 use crate::pricing;
 use chrono::{DateTime, Datelike, Duration, Local, Utc};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 /// Solo miramos archivos modificados en los ultimos N dias (cubre hoy / semana
 /// / mes-calendario de 31d / 30d rolling). Acelera mucho el escaneo. Margen
 /// extra por desfase de mtime de OneDrive y zonas horarias.
 const WINDOW_DAYS: i64 = 35;
 
+#[derive(Clone)]
 struct Record {
     ts: DateTime<Utc>,
     model: String,
@@ -32,12 +41,9 @@ struct Record {
 }
 
 impl Record {
+    /// Total procesado, cache incluida (mismo criterio que Codex).
     fn total_tokens(&self) -> u64 {
         self.input + self.output + self.cache_create_5m + self.cache_create_1h + self.cache_read
-    }
-    /// Tokens "visibles" (sin lectura de cache).
-    fn display_tokens(&self) -> u64 {
-        self.input + self.output + self.cache_create_5m + self.cache_create_1h
     }
     fn cost(&self) -> f64 {
         pricing::cost_usd(
@@ -115,15 +121,66 @@ fn parse_line(line: &str) -> Option<(String, Record)> {
     Some((key, record))
 }
 
+/// Lo ya leido de un .jsonl: offset del ultimo salto de linea completo y los
+/// registros que salieron de ahi.
+#[derive(Default)]
+struct FileState {
+    offset: u64,
+    modified: Option<SystemTime>,
+    records: HashMap<String, Record>,
+}
+
+impl FileState {
+    fn update(&mut self, path: &std::path::Path, len: u64, modified: Option<SystemTime>) -> std::io::Result<()> {
+        // Si el archivo se achico o lo reescribieron, se vuelve a leer entero.
+        if len < self.offset || (len == self.offset && modified != self.modified) {
+            *self = Self::default();
+        }
+        if len != self.offset {
+            let mut reader = BufReader::new(File::open(path)?);
+            reader.seek(SeekFrom::Start(self.offset))?;
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                let bytes = reader.read_until(b'\n', &mut buf)?;
+                // Linea a medio escribir: se retoma en la proxima vuelta.
+                if bytes == 0 || buf.last() != Some(&b'\n') {
+                    break;
+                }
+                self.offset += bytes as u64;
+                if let Some((key, rec)) = parse_line(&String::from_utf8_lossy(&buf)) {
+                    keep_best(&mut self.records, key, rec);
+                }
+            }
+        }
+        self.modified = modified;
+        Ok(())
+    }
+}
+
+/// requestId -> registro mas completo (Claude Code reescribe el mismo request
+/// varias veces mientras hace streaming).
+fn keep_best(map: &mut HashMap<String, Record>, key: String, rec: Record) {
+    match map.get(&key) {
+        Some(existing) if existing.total_tokens() >= rec.total_tokens() => {}
+        _ => {
+            map.insert(key, rec);
+        }
+    }
+}
+
+static FILES: Mutex<Option<HashMap<PathBuf, FileState>>> = Mutex::new(None);
+
 /// Recorre los logs y agrega el costo en ventanas de tiempo.
 pub fn compute() -> CostReport {
     let projects = claude_dir().join("projects");
-    let cutoff_file = std::time::SystemTime::now()
+    let cutoff_file = SystemTime::now()
         .checked_sub(std::time::Duration::from_secs((WINDOW_DAYS as u64) * 86_400))
         .unwrap_or(std::time::UNIX_EPOCH);
 
-    // requestId -> registro mas completo (mayor cantidad de tokens).
-    let mut records: HashMap<String, Record> = HashMap::new();
+    let mut guard = FILES.lock().unwrap_or_else(|e| e.into_inner());
+    let files = guard.get_or_insert_with(HashMap::new);
+    let mut present = HashSet::new();
 
     for entry in walkdir::WalkDir::new(&projects)
         .into_iter()
@@ -136,29 +193,28 @@ pub fn compute() -> CostReport {
         if path.extension().map(|e| e != "jsonl").unwrap_or(true) {
             continue;
         }
-        // Salta archivos viejos (fuera de la ventana de 32 dias).
-        if let Ok(meta) = entry.metadata() {
-            if let Ok(modified) = meta.modified() {
-                if modified < cutoff_file {
-                    continue;
-                }
-            }
+        let Ok(meta) = entry.metadata() else { continue };
+        let modified = meta.modified().ok();
+        // Salta archivos viejos (fuera de la ventana).
+        if modified.is_some_and(|m| m < cutoff_file) {
+            continue;
         }
-        let content = match std::fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        for line in content.lines() {
-            if let Some((key, rec)) = parse_line(line) {
-                match records.get(&key) {
-                    Some(existing) if existing.total_tokens() >= rec.total_tokens() => {}
-                    _ => {
-                        records.insert(key, rec);
-                    }
-                }
-            }
+        let path = entry.into_path();
+        let state = files.entry(path.clone()).or_default();
+        if state.update(&path, meta.len(), modified).is_err() {
+            *state = FileState::default();
         }
+        present.insert(path);
     }
+    files.retain(|p, _| present.contains(p));
+
+    // Dedup global: un mismo requestId puede aparecer en varios archivos
+    // (sesiones resumidas o forkeadas).
+    let mut records: HashMap<String, Record> = HashMap::new();
+    for (key, rec) in files.values().flat_map(|f| &f.records) {
+        keep_best(&mut records, key.clone(), rec.clone());
+    }
+    drop(guard);
 
     let now: DateTime<Local> = Local::now();
     let today = now.date_naive();
@@ -179,7 +235,7 @@ pub fn compute() -> CostReport {
         let local = rec.ts.with_timezone(&Local);
         let date = local.date_naive();
         let cost = rec.cost();
-        let tokens = rec.display_tokens();
+        let tokens = rec.total_tokens();
 
         if date == today {
             report.today_usd += cost;

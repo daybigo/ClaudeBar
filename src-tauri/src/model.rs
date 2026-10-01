@@ -64,7 +64,7 @@ pub struct ModelUsage {
     /// Id crudo del modelo, ej "claude-fable-5".
     pub model: String,
     pub cost_usd: f64,
-    /// Tokens visibles (sin lectura de cache), como en el resto de la UI.
+    /// Tokens totales (cache incluida), como en el resto de la UI y en Codex.
     pub tokens: u64,
 }
 

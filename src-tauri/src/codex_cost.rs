@@ -241,7 +241,7 @@ impl CostCache {
 }
 
 fn estimate(model: &str, tokens: Tokens) -> Option<f64> {
-    // Standard, short-context USD / 1M, verified 2026-09-12:
+    // Standard, short-context USD / 1M, verified 2026-10-01:
     // https://developers.openai.com/api/docs/pricing
     // Deliberately no guessed price for unknown models. This baseline estimate
     // excludes service-tier / long-context uplifts and non-token tools.
@@ -253,6 +253,9 @@ fn estimate(model: &str, tokens: Tokens) -> Option<f64> {
     } else { model };
     let (input, cached, write, output) = match model {
         "gpt-6-astra" => (10.0, 1.0, 12.5, 50.0),
+        "gpt-6.1-sol" => (2.0, 0.1, 2.5, 10.0),
+        "gpt-6-sol" => (2.0, 0.2, 2.5, 10.0),
+        "gpt-6-luna" => (0.1, 0.01, 0.125, 0.5),
         "gpt-5.6-sol" => (4.0, 0.4, 5.0, 20.0),
         "gpt-5.6-terra" => (2.0, 0.2, 2.5, 12.0),
         "gpt-5.6-luna" => (0.2, 0.02, 0.25, 1.2),
@@ -321,6 +324,8 @@ mod tests {
         assert_eq!(t.total(), 1100);
         assert!((estimate("gpt-5.6-sol", t).unwrap() - 0.00312).abs() < 1e-9);
         assert!(estimate("unpublished-model", t).is_none());
+        assert!(estimate("gpt-6-sol", t).is_some());
+        assert!(estimate("gpt-6.1-sol", t).is_some());
     }
 
     #[test]

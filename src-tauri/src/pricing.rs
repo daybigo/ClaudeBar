@@ -14,37 +14,51 @@ pub struct ModelPrice {
     pub cache_read: f64,
 }
 
-// Precios oficiales de Anthropic (fuente: la tabla de LiteLLM que usa ccusage,
-// verificado 2026-07). La familia Claude 5 se reprecio: Opus bajo de $15/$75
-// (era 4.1) a $5/$25 (4.8), y Fable 5 es el tier premium por encima de Opus.
-// En toda la familia las tarifas de cache son multiplos del input: escritura
-// 5m = 1.25x, escritura 1h = 2x (ver cost_usd), lectura = 0.1x.
-const FABLE5: ModelPrice = ModelPrice { input: 10.0, output: 50.0, cache_write_5m: 12.50, cache_read: 1.00 };
-const OPUS48: ModelPrice = ModelPrice { input: 5.0, output: 25.0, cache_write_5m: 6.25, cache_read: 0.50 };
-const OPUS_LEGACY: ModelPrice = ModelPrice { input: 15.0, output: 75.0, cache_write_5m: 18.75, cache_read: 1.50 };
-const SONNET: ModelPrice = ModelPrice { input: 3.0, output: 15.0, cache_write_5m: 3.75, cache_read: 0.30 };
-const HAIKU: ModelPrice = ModelPrice { input: 1.0, output: 5.0, cache_write_5m: 1.25, cache_read: 0.10 };
+// Precios oficiales de Anthropic, verificados 2026-10-01 (docs de la API).
+// Escritura de cache: 5m = 1.25x el input, 1h = 2x (ver cost_usd). La lectura
+// de cache ya no es siempre 0.1x: Fable 5.1 la cobra a 0.025x ($0.25) y
+// Opus 5.5 a 0.05x ($0.20), por eso va explicita por modelo.
+const fn price(input: f64, output: f64, cache_read: f64) -> ModelPrice {
+    ModelPrice { input, output, cache_write_5m: input * 1.25, cache_read }
+}
+const FABLE51: ModelPrice = price(10.0, 50.0, 0.25);
+const FABLE5: ModelPrice = price(10.0, 50.0, 1.00);
+const OPUS55: ModelPrice = price(4.0, 20.0, 0.20);
+const OPUS5: ModelPrice = price(5.0, 25.0, 0.50);
+const OPUS_LEGACY: ModelPrice = price(15.0, 75.0, 1.50);
+const SONNET5: ModelPrice = price(2.0, 10.0, 0.20);
+const SONNET4: ModelPrice = price(3.0, 15.0, 0.30);
+const HAIKU: ModelPrice = price(1.0, 5.0, 0.10);
+const FREE: ModelPrice = price(0.0, 0.0, 0.0);
 
 /// Devuelve el precio para un id de modelo. Coincidencia por substring para
-/// tolerar sufijos de version y fecha (claude-opus-4-8, claude-fable-5, ...).
+/// tolerar sufijos de fecha y de contexto (claude-opus-5-5[1m], ...). El orden
+/// importa: "fable-5-1" antes que "fable-5", "opus-5-5" antes que "opus-5".
 pub fn price_for(model: &str) -> ModelPrice {
     let m = model.to_ascii_lowercase();
-    if m.contains("fable") {
+    if m.starts_with('<') {
+        // "<synthetic>": mensajes que arma Claude Code, no se cobran.
+        FREE
+    } else if m.contains("fable-5-1") || m.contains("mythos-5-1") {
+        FABLE51
+    } else if m.contains("fable") || m.contains("mythos") {
         FABLE5
+    } else if m.contains("opus-5-5") {
+        OPUS55
     } else if m.contains("opus") {
-        // Opus 4.8+ vale $5/$25; las versiones viejas (4.1, 4.0, 3) eran $15/$75.
-        if m.contains("opus-4-1") || m.contains("opus-4-0") || m.contains("opus-3") {
+        // Opus 4.5 a 5 valen $5/$25; las viejas (4.1, 4.0, claude-opus-4-2025xxxx, 3) $15/$75.
+        if m.contains("opus-4-1") || m.contains("opus-4-0") || m.contains("opus-4-2") || m.contains("opus-3") {
             OPUS_LEGACY
         } else {
-            OPUS48
+            OPUS5
         }
     } else if m.contains("haiku") {
         HAIKU
-    } else if m.contains("sonnet") {
-        SONNET
+    } else if m.contains("sonnet-5") {
+        SONNET5
     } else {
-        // Desconocido: usamos Sonnet como estimacion media.
-        SONNET
+        // Sonnet 4.x y desconocidos.
+        SONNET4
     }
 }
 

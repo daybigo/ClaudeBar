@@ -262,11 +262,21 @@ fn read_usage(home: &Path) -> (Option<CodexWindow>, Option<CodexWindow>) {
     (None, None)
 }
 
-/// Busca el ultimo evento con `rate_limits` en un rollout (filtra por substring
-/// para no parsear cada linea de archivos que pueden pesar decenas de MB).
+/// Busca el ultimo evento con `rate_limits` en un rollout. Los rollouts pesan
+/// decenas de MB y el evento que importa esta al final, asi que solo se lee la
+/// cola del archivo (filtrando por substring antes de parsear).
 fn last_rate_limits(path: &Path) -> Option<(Option<CodexWindow>, Option<CodexWindow>)> {
-    let bytes = std::fs::read(path).ok()?;
+    use std::io::{Read, Seek, SeekFrom};
+    const TAIL_BYTES: u64 = 4 * 1024 * 1024;
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(TAIL_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
     let content = String::from_utf8_lossy(&bytes);
+    // Si empezamos a mitad de linea, la primera queda cortada: se descarta.
+    let content = if start > 0 { content.split_once('\n').map_or("", |(_, rest)| rest) } else { &content[..] };
     let mut found = None;
     for line in content.lines() {
         if !line.contains("rate_limits") {
