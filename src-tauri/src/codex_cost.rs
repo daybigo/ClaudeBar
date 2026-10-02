@@ -2,14 +2,12 @@
 //! API-equivalent estimates, never subscription charges or account-wide spend.
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::path::Path;
 use walkdir::WalkDir;
+use crate::logscan::{self, BackgroundIo, SavePolicy};
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,11 +33,15 @@ pub struct CostReport {
     pub incomplete: bool,
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 struct Tokens {
+    #[serde(rename = "i")]
     input: u64,
+    #[serde(rename = "c")]
     cached: u64,
+    #[serde(rename = "w")]
     write: u64,
+    #[serde(rename = "o")]
     output: u64,
 }
 
@@ -69,18 +71,24 @@ impl Tokens {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Record {
-    key: String,
+    #[serde(rename = "k")]
+    key: u64,
+    #[serde(rename = "d")]
     date: NaiveDate,
+    #[serde(rename = "m")]
     model: String,
+    #[serde(rename = "t")]
     tokens: Tokens,
 }
 
-#[derive(Default)]
+/// Progreso de lectura de un rollout. Se persiste entero (incluido el modelo
+/// activo y los contadores acumulados) para retomar justo donde se quedo.
+#[derive(Default, Serialize, Deserialize)]
 struct Rollout {
     offset: u64,
-    modified: Option<SystemTime>,
+    mtime: u64,
     model: String,
     previous: Tokens,
     records: Vec<Record>,
@@ -88,6 +96,8 @@ struct Rollout {
 
 impl Rollout {
     fn ingest(&mut self, line: &str, cutoff: NaiveDate) {
+        // Un rollout de 700 MB trae <1 MB de eventos utiles: filtro por
+        // substring antes de parsear.
         if !line.contains("\"token_count\"") && !line.contains("\"turn_context\"") {
             return;
         }
@@ -131,48 +141,70 @@ impl Rollout {
                 identity.cached, identity.write, identity.output));
         let model = p["model"].as_str().unwrap_or(&self.model);
         self.records.push(Record {
-            key, date, tokens,
+            key: logscan::fnv64(&key), date, tokens,
             model: if model.is_empty() { "unknown" } else { model }.to_string(),
         });
     }
 
-    fn update(&mut self, path: &Path, cutoff: NaiveDate) -> std::io::Result<()> {
-        let file = File::open(path)?;
-        let meta = file.metadata()?;
-        let modified = meta.modified().ok();
-        if meta.len() < self.offset || (meta.len() == self.offset && modified != self.modified) {
+    /// Lee lo nuevo del archivo. Devuelve los bytes leidos.
+    fn update(&mut self, path: &Path, len: u64, mtime: u64, cutoff: NaiveDate) -> std::io::Result<u64> {
+        if len == self.offset && mtime == self.mtime {
+            return Ok(0); // sin cambios: ni se abre
+        }
+        if len <= self.offset {
+            // Se achico o lo reescribieron: se relee desde cero.
             *self = Self::default();
         }
-        if meta.len() != self.offset {
-            let mut reader = BufReader::new(file);
-            reader.seek(SeekFrom::Start(self.offset))?;
-            let mut line = String::new();
-            loop {
-                line.clear();
-                let bytes = reader.read_line(&mut line)?;
-                if bytes == 0 || !line.ends_with('\n') { break; }
-                self.offset += bytes as u64;
-                self.ingest(&line, cutoff);
-            }
-        }
-        self.modified = modified;
-        self.records.retain(|r| r.date >= cutoff);
-        Ok(())
+        let start = self.offset;
+        let offset = logscan::read_new_lines(path, start, |line| self.ingest(line, cutoff))?;
+        self.offset = offset;
+        self.mtime = mtime;
+        Ok(offset - start)
     }
+}
+
+/// Cambia esto si cambia el formato del cache o la forma de parsear: fuerza a
+/// reconstruirlo desde cero.
+const CACHE_VERSION: u32 = 1;
+const CACHE_FILE: &str = "codex-usage-cache.json";
+
+#[derive(Default, Serialize, Deserialize)]
+struct Persisted {
+    version: u32,
+    files: HashMap<String, Rollout>,
 }
 
 #[derive(Default)]
 pub struct CostCache {
-    files: HashMap<PathBuf, Rollout>,
+    loaded: bool,
+    data: Persisted,
+    policy: SavePolicy,
 }
 
 impl CostCache {
+    /// Guarda el progreso pendiente (al cerrar la app).
+    pub fn flush(&mut self) {
+        if self.policy.should_save(0, true) {
+            logscan::save(CACHE_FILE, &self.data);
+            self.policy.saved();
+        }
+    }
+
     pub fn compute(&mut self, home: &Path) -> CostReport {
+        let _bg = BackgroundIo::begin();
+        if !self.loaded {
+            self.loaded = true;
+            if let Some(d) = logscan::load::<Persisted>(CACHE_FILE).filter(|d| d.version == CACHE_VERSION) {
+                self.data = d;
+            }
+            self.data.version = CACHE_VERSION;
+        }
         let now = Local::now();
         let today = now.date_naive();
         let cutoff = today - Duration::days(35);
         let mut present = HashSet::new();
         let mut incomplete = false;
+        let mut bytes_read = 0;
         for dir in ["sessions", "archived_sessions"] {
             let root = home.join(dir);
             if !root.exists() { continue; }
@@ -190,17 +222,32 @@ impl CostCache {
                         continue;
                     }
                 }
-                let path = entry.into_path();
-                if self.files.entry(path.clone()).or_default().update(&path, cutoff).is_err() {
-                    incomplete = true;
+                let key = entry.path().to_string_lossy().into_owned();
+                let rollout = self.data.files.entry(key.clone()).or_default();
+                match rollout.update(entry.path(), meta.len(), logscan::mtime_nanos(&meta), cutoff) {
+                    Ok(0) => {}
+                    Ok(n) => { bytes_read += n; self.policy.mark_dirty(); }
+                    Err(_) => { incomplete = true; *rollout = Rollout::default(); self.policy.mark_dirty(); }
                 }
-                present.insert(path);
+                present.insert(key);
             }
         }
-        self.files.retain(|p, _| present.contains(p));
-        let mut unique: HashMap<&str, &Record> = HashMap::new();
-        for r in self.files.values().flat_map(|file| &file.records) {
-            unique.entry(&r.key).and_modify(|old| {
+        let before = self.data.files.len();
+        self.data.files.retain(|p, _| present.contains(p));
+        if self.data.files.len() != before { self.policy.mark_dirty(); }
+        for file in self.data.files.values_mut() {
+            let n = file.records.len();
+            file.records.retain(|r| r.date >= cutoff);
+            if file.records.len() != n { self.policy.mark_dirty(); }
+        }
+        if self.policy.should_save(bytes_read, false) {
+            logscan::save(CACHE_FILE, &self.data);
+            self.policy.saved();
+        }
+
+        let mut unique: HashMap<u64, &Record> = HashMap::new();
+        for r in self.data.files.values().flat_map(|file| &file.records) {
+            unique.entry(r.key).and_modify(|old| {
                 if r.tokens.total() > old.tokens.total() { *old = r; }
             }).or_insert(r);
         }
@@ -280,6 +327,7 @@ fn estimate(model: &str, tokens: Tokens) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::SystemTime;
     use std::io::Write;
 
     #[test]

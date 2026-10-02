@@ -6,6 +6,7 @@ mod codex;
 mod codex_cost;
 mod cost;
 mod credentials;
+mod logscan;
 mod model;
 mod pricing;
 mod tray_icon;
@@ -92,8 +93,15 @@ fn set_provider(app: AppHandle, provider: String) {
     std::thread::spawn(move || refresh_tray_for_provider(&a));
 }
 
+/// Guarda el progreso de lectura de logs para no releerlos al volver a abrir.
+fn flush_caches() {
+    cost::flush();
+    codex::flush();
+}
+
 #[tauri::command]
 fn quit(app: AppHandle) {
+    flush_caches();
     app.exit(0);
 }
 
@@ -598,7 +606,10 @@ pub fn run() {
                             let _ = al.enable();
                         }
                     }
-                    "quit" => app.exit(0),
+                    "quit" => {
+                        flush_caches();
+                        app.exit(0)
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {

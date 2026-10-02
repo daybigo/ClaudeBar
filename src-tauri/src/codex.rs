@@ -100,6 +100,14 @@ pub fn next_refresh_delay() -> Duration {
         .next_delay(Instant::now())
 }
 
+/// Guarda el progreso de lectura de los rollouts (al cerrar la app). No
+/// espera si hay un escaneo en curso.
+pub fn flush() {
+    if let Some(Ok(mut reader)) = READER.get().map(|r| r.try_lock()) {
+        reader.costs.flush();
+    }
+}
+
 pub fn read(force: bool) -> CodexStatus {
     let mut reader = READER.get_or_init(|| Mutex::new(Reader::default())).lock().unwrap();
     let Some(home) = codex_home() else {
@@ -266,11 +274,16 @@ fn read_usage(home: &Path) -> (Option<CodexWindow>, Option<CodexWindow>) {
 /// decenas de MB y el evento que importa esta al final, asi que solo se lee la
 /// cola del archivo (filtrando por substring antes de parsear).
 fn last_rate_limits(path: &Path) -> Option<(Option<CodexWindow>, Option<CodexWindow>)> {
+    // Casi siempre el ultimo evento cae en los ultimos KB; solo si no aparece
+    // se mira una cola mas grande.
+    [256 * 1024, 4 * 1024 * 1024].into_iter().find_map(|tail| rate_limits_in_tail(path, tail))
+}
+
+fn rate_limits_in_tail(path: &Path, tail: u64) -> Option<(Option<CodexWindow>, Option<CodexWindow>)> {
     use std::io::{Read, Seek, SeekFrom};
-    const TAIL_BYTES: u64 = 4 * 1024 * 1024;
     let mut file = std::fs::File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
-    let start = len.saturating_sub(TAIL_BYTES);
+    let start = len.saturating_sub(tail);
     file.seek(SeekFrom::Start(start)).ok()?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).ok()?;

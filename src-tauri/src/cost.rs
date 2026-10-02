@@ -9,34 +9,43 @@
 //! Los tokens mostrados son el total procesado (input + output + escritura y
 //! lectura de cache), igual que en Codex, para que ambos se comparen 1 a 1.
 //!
-//! El escaneo es incremental: cada archivo recuerda hasta que byte se leyo y
-//! solo se parsean las lineas nuevas. Antes se releian ~2 GB de logs cada 60s.
+//! Lectura eficiente (ver logscan): solo se leen bytes nuevos de cada archivo
+//! y el progreso se guarda en disco, asi que reiniciar la app no relee nada.
 
 use crate::credentials::claude_dir;
+use crate::logscan::{self, BackgroundIo, SavePolicy};
 use crate::model::{CostReport, ModelUsage};
 use crate::pricing;
-use chrono::{DateTime, Datelike, Duration, Local, Utc};
-use serde_json::Value;
+use chrono::{DateTime, Datelike, Duration, Local, TimeZone, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
-use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::SystemTime;
 
 /// Solo miramos archivos modificados en los ultimos N dias (cubre hoy / semana
-/// / mes-calendario de 31d / 30d rolling). Acelera mucho el escaneo. Margen
-/// extra por desfase de mtime de OneDrive y zonas horarias.
+/// / mes-calendario de 31d / 30d rolling). Margen extra por desfase de mtime y
+/// zonas horarias.
 const WINDOW_DAYS: i64 = 35;
+/// Cambia esto si cambia el formato del cache o la forma de parsear: fuerza a
+/// reconstruirlo desde cero.
+const CACHE_VERSION: u32 = 1;
+const CACHE_FILE: &str = "claude-usage-cache.json";
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Record {
-    ts: DateTime<Utc>,
+    /// Epoch en segundos (UTC).
+    #[serde(rename = "t")]
+    ts: i64,
+    #[serde(rename = "m")]
     model: String,
+    #[serde(rename = "i")]
     input: u64,
+    #[serde(rename = "o")]
     output: u64,
+    #[serde(rename = "w5")]
     cache_create_5m: u64,
+    #[serde(rename = "w1")]
     cache_create_1h: u64,
+    #[serde(rename = "r")]
     cache_read: u64,
 }
 
@@ -57,110 +66,93 @@ impl Record {
     }
 }
 
-fn u64_at(v: &Value, key: &str) -> u64 {
-    v.get(key).and_then(|x| x.as_u64()).unwrap_or(0)
+// Solo los campos que importan de una linea; serde salta el resto (el texto
+// de los mensajes) sin armar un arbol JSON entero.
+#[derive(Deserialize)]
+struct Line {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    timestamp: Option<String>,
+    #[serde(rename = "requestId")]
+    request_id: Option<String>,
+    uuid: Option<String>,
+    message: Option<Message>,
+}
+
+#[derive(Deserialize)]
+struct Message {
+    model: Option<String>,
+    usage: Option<Usage>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Usage {
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation_input_tokens: u64,
+    cache_read_input_tokens: u64,
+    cache_creation: Option<CacheCreation>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct CacheCreation {
+    ephemeral_5m_input_tokens: u64,
+    ephemeral_1h_input_tokens: u64,
 }
 
 /// Parsea una linea jsonl a Record (o None si no es un assistant con usage).
-fn parse_line(line: &str) -> Option<(String, Record)> {
-    if !line.contains("\"assistant\"") {
+fn parse_line(line: &str) -> Option<(u64, Record)> {
+    // Filtro barato antes de parsear: la gran mayoria de lineas no sirven.
+    if !line.contains("\"assistant\"") || !line.contains("\"usage\"") {
         return None;
     }
-    let v: Value = serde_json::from_str(line).ok()?;
-    if v.get("type").and_then(|x| x.as_str()) != Some("assistant") {
+    let v: Line = serde_json::from_str(line).ok()?;
+    if v.kind.as_deref() != Some("assistant") {
         return None;
     }
-    let msg = v.get("message")?;
-    let usage = msg.get("usage")?;
+    let msg = v.message?;
+    let usage = msg.usage?;
+    let ts = DateTime::parse_from_rfc3339(v.timestamp.as_deref()?).ok()?.timestamp();
 
-    let ts_str = v.get("timestamp").and_then(|x| x.as_str())?;
-    let ts = DateTime::parse_from_rfc3339(ts_str).ok()?.with_timezone(&Utc);
-
-    let model = msg
-        .get("model")
-        .and_then(|x| x.as_str())
-        .unwrap_or("unknown")
-        .to_string();
-
-    // Desglose de cache_creation si existe; si no, todo va al bucket de 5m.
-    let cc_total = u64_at(usage, "cache_creation_input_tokens");
-    let (cc_5m, cc_1h) = match usage.get("cache_creation") {
-        Some(b) if b.is_object() => (
-            u64_at(b, "ephemeral_5m_input_tokens"),
-            u64_at(b, "ephemeral_1h_input_tokens"),
-        ),
+    // Desglose de cache_creation si existe; si no cuadra, todo va al bucket de 5m.
+    let cc_total = usage.cache_creation_input_tokens;
+    let (cc_5m, cc_1h) = match &usage.cache_creation {
+        Some(b) if b.ephemeral_5m_input_tokens + b.ephemeral_1h_input_tokens > 0 => {
+            (b.ephemeral_5m_input_tokens, b.ephemeral_1h_input_tokens)
+        }
         _ => (cc_total, 0),
-    };
-    // Si el desglose no cuadra con el total, usamos el total como 5m.
-    let (cc_5m, cc_1h) = if cc_5m + cc_1h == 0 && cc_total > 0 {
-        (cc_total, 0)
-    } else {
-        (cc_5m, cc_1h)
-    };
-
-    let record = Record {
-        ts,
-        model,
-        input: u64_at(usage, "input_tokens"),
-        output: u64_at(usage, "output_tokens"),
-        cache_create_5m: cc_5m,
-        cache_create_1h: cc_1h,
-        cache_read: u64_at(usage, "cache_read_input_tokens"),
     };
 
     // Clave de deduplicacion: requestId; si no, el uuid de la linea.
-    let key = v
-        .get("requestId")
-        .and_then(|x| x.as_str())
-        .or_else(|| v.get("uuid").and_then(|x| x.as_str()))
-        .unwrap_or("")
-        .to_string();
-    if key.is_empty() {
-        return None;
-    }
-    Some((key, record))
+    let key = v.request_id.or(v.uuid).filter(|k| !k.is_empty())?;
+    Some((
+        logscan::fnv64(&key),
+        Record {
+            ts,
+            model: msg.model.unwrap_or_else(|| "unknown".into()),
+            input: usage.input_tokens,
+            output: usage.output_tokens,
+            cache_create_5m: cc_5m,
+            cache_create_1h: cc_1h,
+            cache_read: usage.cache_read_input_tokens,
+        },
+    ))
 }
 
 /// Lo ya leido de un .jsonl: offset del ultimo salto de linea completo y los
 /// registros que salieron de ahi.
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct FileState {
     offset: u64,
-    modified: Option<SystemTime>,
-    records: HashMap<String, Record>,
-}
-
-impl FileState {
-    fn update(&mut self, path: &std::path::Path, len: u64, modified: Option<SystemTime>) -> std::io::Result<()> {
-        // Si el archivo se achico o lo reescribieron, se vuelve a leer entero.
-        if len < self.offset || (len == self.offset && modified != self.modified) {
-            *self = Self::default();
-        }
-        if len != self.offset {
-            let mut reader = BufReader::new(File::open(path)?);
-            reader.seek(SeekFrom::Start(self.offset))?;
-            let mut buf = Vec::new();
-            loop {
-                buf.clear();
-                let bytes = reader.read_until(b'\n', &mut buf)?;
-                // Linea a medio escribir: se retoma en la proxima vuelta.
-                if bytes == 0 || buf.last() != Some(&b'\n') {
-                    break;
-                }
-                self.offset += bytes as u64;
-                if let Some((key, rec)) = parse_line(&String::from_utf8_lossy(&buf)) {
-                    keep_best(&mut self.records, key, rec);
-                }
-            }
-        }
-        self.modified = modified;
-        Ok(())
-    }
+    mtime: u64,
+    records: HashMap<u64, Record>,
 }
 
 /// requestId -> registro mas completo (Claude Code reescribe el mismo request
 /// varias veces mientras hace streaming).
-fn keep_best(map: &mut HashMap<String, Record>, key: String, rec: Record) {
+fn keep_best(map: &mut HashMap<u64, Record>, key: u64, rec: Record) {
     match map.get(&key) {
         Some(existing) if existing.total_tokens() >= rec.total_tokens() => {}
         _ => {
@@ -169,50 +161,121 @@ fn keep_best(map: &mut HashMap<String, Record>, key: String, rec: Record) {
     }
 }
 
-static FILES: Mutex<Option<HashMap<PathBuf, FileState>>> = Mutex::new(None);
+#[derive(Default, Serialize, Deserialize)]
+struct Cache {
+    version: u32,
+    files: HashMap<String, FileState>,
+}
+
+#[derive(Default)]
+struct Scanner {
+    loaded: bool,
+    cache: Cache,
+    policy: SavePolicy,
+}
+
+static SCANNER: Mutex<Option<Scanner>> = Mutex::new(None);
+
+impl Scanner {
+    /// Pone al dia el cache con lo nuevo de cada archivo. Devuelve los bytes leidos.
+    fn scan(&mut self) -> u64 {
+        if !self.loaded {
+            self.loaded = true;
+            if let Some(c) = logscan::load::<Cache>(CACHE_FILE).filter(|c| c.version == CACHE_VERSION) {
+                self.cache = c;
+            }
+            self.cache.version = CACHE_VERSION;
+        }
+        let projects = claude_dir().join("projects");
+        let now = Utc::now();
+        let cutoff_ts = (now - Duration::days(WINDOW_DAYS)).timestamp();
+        let cutoff_mtime = (cutoff_ts.max(0) as u64) * 1_000_000_000;
+        let files = &mut self.cache.files;
+        let mut present = HashSet::new();
+        let mut bytes_read = 0;
+
+        for entry in walkdir::WalkDir::new(&projects).into_iter().flatten() {
+            if !entry.file_type().is_file() || entry.path().extension().map_or(true, |e| e != "jsonl") {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            let (len, mtime) = (meta.len(), logscan::mtime_nanos(&meta));
+            // Archivos sin tocar desde antes de la ventana: no pueden aportar.
+            if mtime < cutoff_mtime {
+                continue;
+            }
+            let key = entry.path().to_string_lossy().into_owned();
+            let state = files.entry(key.clone()).or_default();
+            present.insert(key);
+            if len == state.offset && mtime == state.mtime {
+                continue; // sin cambios: ni se abre
+            }
+            // Si se achico o lo reescribieron con el mismo tamaño, se relee entero.
+            if len <= state.offset {
+                *state = FileState::default();
+            }
+            let start = state.offset;
+            let records = &mut state.records;
+            match logscan::read_new_lines(entry.path(), start, |line| {
+                if let Some((k, rec)) = parse_line(line) {
+                    keep_best(records, k, rec);
+                }
+            }) {
+                Ok(offset) => {
+                    bytes_read += offset - start;
+                    state.offset = offset;
+                    state.mtime = mtime;
+                }
+                Err(_) => *state = FileState::default(),
+            }
+            self.policy.mark_dirty();
+        }
+
+        let before = files.len();
+        files.retain(|p, _| present.contains(p));
+        for state in files.values_mut() {
+            let n = state.records.len();
+            state.records.retain(|_, r| r.ts >= cutoff_ts);
+            if state.records.len() != n {
+                self.policy.mark_dirty();
+            }
+        }
+        if files.len() != before {
+            self.policy.mark_dirty();
+        }
+        bytes_read
+    }
+
+    fn save_if_needed(&mut self, bytes_read: u64, force: bool) {
+        if self.policy.should_save(bytes_read, force) {
+            logscan::save(CACHE_FILE, &self.cache);
+            self.policy.saved();
+        }
+    }
+}
+
+/// Guarda el progreso pendiente (al cerrar la app).
+pub fn flush() {
+    if let Ok(mut guard) = SCANNER.try_lock() {
+        if let Some(s) = guard.as_mut() {
+            s.save_if_needed(0, true);
+        }
+    }
+}
 
 /// Recorre los logs y agrega el costo en ventanas de tiempo.
 pub fn compute() -> CostReport {
-    let projects = claude_dir().join("projects");
-    let cutoff_file = SystemTime::now()
-        .checked_sub(std::time::Duration::from_secs((WINDOW_DAYS as u64) * 86_400))
-        .unwrap_or(std::time::UNIX_EPOCH);
-
-    let mut guard = FILES.lock().unwrap_or_else(|e| e.into_inner());
-    let files = guard.get_or_insert_with(HashMap::new);
-    let mut present = HashSet::new();
-
-    for entry in walkdir::WalkDir::new(&projects)
-        .into_iter()
-        .flatten()
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let path = entry.path();
-        if path.extension().map(|e| e != "jsonl").unwrap_or(true) {
-            continue;
-        }
-        let Ok(meta) = entry.metadata() else { continue };
-        let modified = meta.modified().ok();
-        // Salta archivos viejos (fuera de la ventana).
-        if modified.is_some_and(|m| m < cutoff_file) {
-            continue;
-        }
-        let path = entry.into_path();
-        let state = files.entry(path.clone()).or_default();
-        if state.update(&path, meta.len(), modified).is_err() {
-            *state = FileState::default();
-        }
-        present.insert(path);
-    }
-    files.retain(|p, _| present.contains(p));
+    let _bg = BackgroundIo::begin();
+    let mut guard = SCANNER.lock().unwrap_or_else(|e| e.into_inner());
+    let scanner = guard.get_or_insert_with(Scanner::default);
+    let bytes_read = scanner.scan();
+    scanner.save_if_needed(bytes_read, false);
 
     // Dedup global: un mismo requestId puede aparecer en varios archivos
     // (sesiones resumidas o forkeadas).
-    let mut records: HashMap<String, Record> = HashMap::new();
-    for (key, rec) in files.values().flat_map(|f| &f.records) {
-        keep_best(&mut records, key.clone(), rec.clone());
+    let mut records: HashMap<u64, Record> = HashMap::new();
+    for (key, rec) in scanner.cache.files.values().flat_map(|f| &f.records) {
+        keep_best(&mut records, *key, rec.clone());
     }
     drop(guard);
 
@@ -232,7 +295,7 @@ pub fn compute() -> CostReport {
     let mut model_tokens: HashMap<String, u64> = HashMap::new();
 
     for rec in records.values() {
-        let local = rec.ts.with_timezone(&Local);
+        let Some(local) = Local.timestamp_opt(rec.ts, 0).single() else { continue };
         let date = local.date_naive();
         let cost = rec.cost();
         let tokens = rec.total_tokens();
